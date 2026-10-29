@@ -60,7 +60,10 @@ book-searchie serve           # (planned) opens http://localhost:8000 in your br
 | `index [--full] [-q]` | Add new and changed books, and drop deleted ones. `--full` re-reads everything |
 | `search QUERY [-t TOPIC] [-n LIMIT]` | Search from the terminal |
 | `topics` | List topics and how many books each has |
-| `report` | List books that can't be searched (scanned, damaged, password-protected or DRM) |
+| `report` | List books that can't be searched (scanned, password-protected, DRM, damaged), and how to fix each |
+| `ocr [BOOK]... [-l LANG]` | Make scanned books searchable with OCR (see [Books that can't be searched](#books-that-cant-be-searched)) |
+
+> **Windows PowerShell 5.1 tip:** it strips double quotes from arguments, so `'"black cohosh"'` arrives as two separate words. Escape them: `book-searchie search '\"black cohosh\"'`. Command Prompt and PowerShell 7+ don't have this problem.
 
 Every command accepts `--config FILE` to use a config file other than `./book-searchie.toml`. You can also set `BOOK_SEARCHIE_CONFIG`.
 
@@ -192,7 +195,45 @@ Example configs for both will be included in `docs/`.
 
 - **One-time and incremental:** each file's size and modified time are recorded, so re-indexing only processes new or changed files, and removes entries for deleted ones.
 - **Text normalisation:** ligatures (`ﬁ` becomes `fi`), odd whitespace and hyphenated line breaks are cleaned up so searches match.
-- **Scanned PDFs:** files with no text layer are flagged in an *Unsearchable files* report rather than skipped silently. Running [`ocrmypdf`](https://github.com/ocrmypdf/OCRmyPDF) on them adds a text layer.
+- **Problem books are reported, not skipped silently.** See below.
+
+### Books that can't be searched
+
+After indexing, `book-searchie index` says how many books couldn't be read, and `book-searchie report` lists them by problem, with the fix for each:
+
+| Problem | What it means | Fix |
+|---|---|---|
+| **Scanned** | The pages are pictures of text, with no text layer to search | `book-searchie ocr` (below) |
+| **Password-protected** | The PDF needs a password just to open it | Remove the password once, e.g. open it and *Print to PDF*, or `qpdf --decrypt --password=PASSWORD locked.pdf unlocked.pdf`, then replace the file |
+| **DRM-protected** | A shop (Adobe Digital Editions, Apple Books, Readium LCP, ...) has encrypted the book so only its own app can open it | Get a DRM-free copy. Book-Searchie doesn't remove DRM: doing so is unlawful in the UK, US and many other countries |
+| **Damaged** | The file is corrupt or not really a PDF/EPUB | Re-download or replace it |
+
+PDFs that only restrict printing or copying are indexed normally.
+
+#### OCR for scanned books
+
+`book-searchie ocr` uses [OCRmyPDF](https://github.com/ocrmypdf/OCRmyPDF) and Tesseract to read the text from page images. **Your files are never changed:** the OCR'd copy is saved in a cache folder next to the index (`book-searchie-ocr/`), and Book-Searchie searches and displays that copy instead. Copies are named by the original's SHA-256 fingerprint, so they survive the book being renamed or moved, and are ignored if the book itself changes.
+
+OCR is optional and needs extra software: the OCRmyPDF package and the Tesseract OCR program. (Ghostscript isn't needed, because Book-Searchie asks for plain PDF output rather than PDF/A.)
+
+```bash
+pip install "book-searchie[ocr]"                 # or: pip install -e ".[ocr]" from a checkout
+winget install UB-Mannheim.TesseractOCR          # Windows
+brew install tesseract                           # macOS
+sudo apt install tesseract-ocr                   # Linux (Debian/Ubuntu)
+```
+
+For languages other than English, install Tesseract's language data too (on Windows, pick the languages in the Tesseract installer).
+
+Then:
+
+```bash
+book-searchie ocr                                    # every scanned book in the report
+book-searchie ocr "Herbalism/Culpeper's Complete Herbal.pdf"
+book-searchie ocr --language eng+lat "Herbalism/Old Herbal.pdf"   # Tesseract language codes
+```
+
+It takes roughly 1–3 seconds per page. Ctrl+C stops at any point: finished books are kept, and the next run carries on. Pages that already have text are left alone, so partly scanned books work too.
 - **FTS5 check:** some Linux distributions build Python's SQLite without FTS5. Book-Searchie checks for it at startup and explains how to fix it if it's missing.
 
 ### Locations in results
@@ -216,7 +257,9 @@ Example configs for both will be included in `docs/`.
 - [x] Folder exclusions (`_`-prefixed folders plus `exclude` patterns)
 - [x] Incremental re-indexing
 - [x] CLI search (`book-searchie search "term"`) for testing
-- [x] Unsearchable files report (`book-searchie report`)
+- [x] Unsearchable files report (`book-searchie report`), with a fix for each problem
+- [x] Password and DRM detection
+- [x] Optional OCR for scanned PDFs (`book-searchie ocr`), without modifying the library
 
 ### Phase 2: Web UI (local mode)
 - [ ] Search page with topic dropdown
@@ -259,7 +302,7 @@ cd book-searchie
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # macOS / Linux
-pip install -e ".[dev]"
+pip install -e ".[dev]"         # add ,ocr  (".[dev,ocr]") to work on OCR
 pytest                          # run the tests
 ```
 

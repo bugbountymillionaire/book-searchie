@@ -12,7 +12,7 @@ from .scan import LibraryFile
 
 # Bump when the schema changes. The index is a cache of the library, so an old
 # index is simply rebuilt.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE files (
@@ -25,8 +25,10 @@ CREATE TABLE files (
     kind TEXT NOT NULL,
     size INTEGER NOT NULL,
     mtime REAL NOT NULL,
-    status TEXT NOT NULL,          -- ok | no_text | error
+    status TEXT NOT NULL,          -- ok | no_text | password | drm | error
     message TEXT,
+    content_hash TEXT,             -- sha256, recorded for scanned PDFs to find their OCR copy
+    ocr INTEGER NOT NULL DEFAULT 0, -- 1 if the text came from an OCR copy
     units INTEGER NOT NULL DEFAULT 0,
     indexed_at TEXT NOT NULL
 );
@@ -86,6 +88,8 @@ class FileState:
     size: int
     mtime: float
     status: str
+    content_hash: str | None
+    ocr: bool
 
 
 class Database:
@@ -131,8 +135,11 @@ class Database:
             self.conn.execute("DELETE FROM files")
 
     def file_states(self) -> dict[str, FileState]:
-        rows = self.conn.execute("SELECT id, path, root, size, mtime, status FROM files")
-        return {r["path"]: FileState(r["id"], r["root"], r["size"], r["mtime"], r["status"]) for r in rows}
+        rows = self.conn.execute("SELECT id, path, root, size, mtime, status, content_hash, ocr FROM files")
+        return {
+            r["path"]: FileState(r["id"], r["root"], r["size"], r["mtime"], r["status"], r["content_hash"], bool(r["ocr"]))
+            for r in rows
+        }
 
     def remove_file(self, file_id: int) -> None:
         with self.conn:
@@ -142,24 +149,27 @@ class Database:
         self.conn.execute("DELETE FROM sections WHERE file_id = ?", (file_id,))
         self.conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
 
-    def store_file(self, f: LibraryFile, extracted: Extracted | None, error: str | None = None) -> None:
+    def store_file(
+        self,
+        f: LibraryFile,
+        extracted: Extracted | None,
+        *,
+        status: str,
+        message: str | None = None,
+        content_hash: str | None = None,
+        ocr: bool = False,
+    ) -> None:
         """Replace everything indexed for this file in one transaction."""
-        if error is not None:
-            status = "error"
-        elif extracted.no_text:
-            status = "no_text"
-        else:
-            status = "ok"
         with self.conn:
             old = self.conn.execute("SELECT id FROM files WHERE path = ?", (str(f.path),)).fetchone()
             if old:
                 self._delete(old["id"])
             cur = self.conn.execute(
-                "INSERT INTO files (path, root, rel, topic, title, kind, size, mtime, status, message, units, indexed_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO files (path, root, rel, topic, title, kind, size, mtime, status, message,"
+                " content_hash, ocr, units, indexed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     str(f.path), str(f.root), f.rel, f.topic, f.path.stem, f.kind, f.size, f.mtime,
-                    status, error, extracted.units if extracted else 0,
+                    status, message, content_hash, int(ocr), extracted.units if extracted else 0,
                     datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 ),
             )
@@ -171,8 +181,12 @@ class Database:
 
     def problem_files(self) -> list[sqlite3.Row]:
         return self.conn.execute(
-            "SELECT topic, rel, status, message FROM files WHERE status != 'ok' ORDER BY status, topic, rel"
+            "SELECT path, topic, rel, kind, status, message, content_hash, ocr, units FROM files"
+            " WHERE status != 'ok' ORDER BY status, topic, rel"
         ).fetchall()
+
+    def ocr_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM files WHERE ocr = 1").fetchone()[0]
 
     def topics(self) -> list[sqlite3.Row]:
         return self.conn.execute(

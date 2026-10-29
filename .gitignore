@@ -12,6 +12,7 @@ book-searchie.toml
 *.db
 *.db-wal
 *.db-shm
+*-ocr/
 
 # Never commit books
 *.pdf

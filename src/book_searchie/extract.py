@@ -19,7 +19,30 @@ MIN_CHARS_PER_PAGE = 20
 
 
 class ExtractError(Exception):
-    """The file can't be read (corrupt, password-protected, DRM, ...)."""
+    """The file can't be read (damaged, unsupported, ...)."""
+
+
+class PasswordProtected(ExtractError):
+    """The PDF needs a password to open."""
+
+
+class DrmProtected(ExtractError):
+    """The book is locked to a reading app by DRM, so its text is encrypted."""
+
+
+# Markers of DRM security handlers in a PDF's encryption dictionary, and who makes them.
+_PDF_DRM_HANDLERS = {
+    b"EBX_HANDLER": "Adobe Digital Editions",
+    b"Adobe.APS": "Adobe LiveCycle",
+    b"FOPN_": "FileOpen",
+}
+
+# Files whose presence in an EPUB identifies the DRM scheme.
+_EPUB_DRM_FILES = {
+    "META-INF/rights.xml": "Adobe Digital Editions",
+    "META-INF/sinf.xml": "Apple Books",
+    "META-INF/license.lcpl": "Readium LCP",
+}
 
 
 @dataclass
@@ -63,10 +86,12 @@ def extract_pdf(path: Path) -> Extracted:
     try:
         doc = pymupdf.open(path)
     except Exception as e:
+        _check_pdf_drm(path)
         raise ExtractError(f"can't open PDF: {e}") from None
     with doc:
         if doc.needs_pass:
-            raise ExtractError("password protected")
+            _check_pdf_drm(path)
+            raise PasswordProtected("needs a password to open")
         result = Extracted(units=doc.page_count)
         chars = 0
         for page in doc:
@@ -77,6 +102,21 @@ def extract_pdf(path: Path) -> Extracted:
                 result.sections.append(Section(page.number, label, text))
         result.no_text = chars < MIN_CHARS_PER_PAGE * max(doc.page_count, 1)
     return result
+
+
+def _check_pdf_drm(path: Path) -> None:
+    """Raise DrmProtected if a PDF that won't open uses a DRM security handler.
+
+    Only called after opening fails, so reading the whole file is rare. A DRM
+    PDF otherwise looks like a password-protected one.
+    """
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return
+    for marker, vendor in _PDF_DRM_HANDLERS.items():
+        if marker in data:
+            raise DrmProtected(f"DRM protected ({vendor})")
 
 
 # --- EPUB --------------------------------------------------------------------
@@ -151,6 +191,9 @@ class _Epub:
         self.zf = zf
         # Some EPUBs reference files with different capitalisation than the zip holds.
         self._names = {n.lower(): n for n in zf.namelist()}
+
+    def exists(self, name: str) -> bool:
+        return name.lower() in self._names
 
     def read(self, name: str) -> bytes:
         real = self._names.get(name.lower())
@@ -244,7 +287,8 @@ def _check_drm(epub: _Epub) -> None:
         if _local(el.tag) == "CipherReference":
             uri = (el.get("URI") or "").lower()
             if uri.endswith((".xhtml", ".html", ".htm", ".xml")):
-                raise ExtractError("DRM protected")
+                vendor = next((v for name, v in _EPUB_DRM_FILES.items() if epub.exists(name)), None)
+                raise DrmProtected(f"DRM protected ({vendor})" if vendor else "DRM protected")
 
 
 def _toc_titles(epub: _Epub, manifest: dict, toc_id: str | None, opf_dir: str) -> dict[str, str]:

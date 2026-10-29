@@ -6,9 +6,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .config import Config
-from .db import Database
-from .extract import ExtractError, extract
-from .scan import scan_library
+from .db import Database, FileState
+from .extract import DrmProtected, ExtractError, PasswordProtected, extract, extract_pdf
+from .ocr import file_hash, ocr_copy_path
+from .scan import LibraryFile, scan_library
 
 
 @dataclass
@@ -53,21 +54,54 @@ def run_index(
     todo = []
     for path, f in found.items():
         state = known.get(path)
-        if state is not None and state.size == f.size and state.mtime == f.mtime:
+        if state is not None and state.size == f.size and state.mtime == f.mtime and not _ocr_changed(config, state):
             report.unchanged += 1
         else:
             todo.append((f, state is None))
 
     for i, (f, is_new) in enumerate(todo, 1):
         progress(f"[{i}/{len(todo)}] {f.rel}")
-        try:
-            db.store_file(f, extract(f.path, f.kind))
-        except ExtractError as e:
-            db.store_file(f, None, error=str(e))
-        except Exception as e:  # never let one bad book stop the whole run
-            db.store_file(f, None, error=f"{type(e).__name__}: {e}")
+        _index_file(config, db, f)
         if is_new:
             report.added += 1
         else:
             report.updated += 1
     return report
+
+
+def _ocr_changed(config: Config, state: FileState) -> bool:
+    """True if an OCR copy has appeared for a scanned book, or the one in use has gone."""
+    if not state.content_hash:
+        return False
+    return ocr_copy_path(config, state.content_hash).is_file() != state.ocr
+
+
+def _index_file(config: Config, db: Database, f: LibraryFile) -> None:
+    try:
+        extracted = extract(f.path, f.kind)
+    except PasswordProtected as e:
+        return db.store_file(f, None, status="password", message=str(e))
+    except DrmProtected as e:
+        return db.store_file(f, None, status="drm", message=str(e))
+    except ExtractError as e:
+        return db.store_file(f, None, status="error", message=str(e))
+    except Exception as e:  # never let one bad book stop the whole run
+        return db.store_file(f, None, status="error", message=f"{type(e).__name__}: {e}")
+
+    if not extracted.no_text:
+        return db.store_file(f, extracted, status="ok")
+    if f.kind != "pdf":
+        return db.store_file(f, extracted, status="no_text")
+
+    # A scanned PDF: use its OCR copy if there is one.
+    digest = file_hash(f.path)
+    copy = ocr_copy_path(config, digest)
+    if copy.is_file():
+        try:
+            from_copy = extract_pdf(copy)
+        except ExtractError:
+            pass  # damaged copy; fall back to the original and let 'ocr' redo it
+        else:
+            status = "no_text" if from_copy.no_text else "ok"
+            return db.store_file(f, from_copy, status=status, content_hash=digest, ocr=True)
+    db.store_file(f, extracted, status="no_text", content_hash=digest)
