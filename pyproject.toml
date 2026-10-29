@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "book-searchie"
+version = "0.1.0"
+description = "Turn a folder of PDFs and EPUBs into a searchable knowledge base."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "pymupdf>=1.24.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+
+[project.scripts]
+book-searchie = "book_searchie.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/book_searchie"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

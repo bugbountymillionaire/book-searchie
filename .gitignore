@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Local config and index (machine-specific, may reveal library contents)
+book-searchie.toml
+*.db
+*.db-wal
+*.db-shm
+
+# Never commit books
+*.pdf
+*.epub
+library/
