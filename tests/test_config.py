@@ -15,7 +15,7 @@ def test_render_and_load(tmp_path, monkeypatch):
     assert config.roots[0] == (tmp_path / "books").resolve()  # relative to the config file
     assert config.roots[1].name == "My Books"
     assert config.index_path == (tmp_path / "book-searchie.db").resolve()
-    assert config.mode == "local" and config.port == 8000
+    assert config.mode == "local" and config.port == 8004
 
 
 def test_env_overrides(tmp_path, monkeypatch):

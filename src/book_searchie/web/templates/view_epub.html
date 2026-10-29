@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ book.title }}, {{ label }} · Book-Searchie{% endblock %}
+{% block body_class %}viewer{% endblock %}
+{% block main_class %}viewer-main{% endblock %}
+{% block content %}
+{% include "_viewer_bar.html" %}
+<div class="viewer-tools">
+  <div class="group">
+    {% if prev_chapter is not none %}<a class="btn" id="prev-page" href="/view/{{ book.id }}/{{ prev_chapter }}{{ qs }}" title="Previous chapter (←)">‹ Chapter</a>{% else %}<span class="btn disabled">‹ Chapter</span>{% endif %}
+    <span class="position">{{ label }} <span class="dim">({{ chapter_number }} of {{ chapter_total }})</span></span>
+    {% if next_chapter is not none %}<a class="btn" id="next-page" href="/view/{{ book.id }}/{{ next_chapter }}{{ qs }}" title="Next chapter (→)">Chapter ›</a>{% else %}<span class="btn disabled">Chapter ›</span>{% endif %}
+  </div>
+  {% if marks %}
+  <div class="group">
+    <button class="btn" type="button" id="prev-mark" title="Previous highlight (shift+n)">↑</button>
+    <span class="position" id="mark-label">{{ marks }} highlight{{ 's' if marks != 1 }} here</span>
+    <button class="btn" type="button" id="next-mark" title="Next highlight (n)">↓</button>
+  </div>
+  {% endif %}
+</div>
+<article class="chapter" id="chapter" data-marks="{{ marks }}">
+  {{ content }}
+</article>
+{% endblock %}
+{% block scripts %}<script src="/static/viewer.js?v={{ version }}"></script>{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ book.title }} · Book-Searchie{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/?{{ {'q': q}|urlencode }}">← All results</a></p>
+<h1 class="book-title">{{ book.title }}</h1>
+<div class="meta">
+  <span class="tag">{{ book.topic }}</span>
+  <span class="tag kind">{{ book.kind|upper }}</span>
+  {% if book.ocr %}<span class="tag ocr">OCR</span>{% endif %}
+</div>
+{% if error %}
+  <div class="notice error">{{ error }}</div>
+{% elif not hits %}
+  <div class="notice">No matches for <strong>{{ q }}</strong> in this book.</div>
+{% else %}
+  <p class="result-summary">{{ hits|length }} matching {{ 'page' if book.kind == 'pdf' else 'chapter' }}{{ 's' if hits|length != 1 }} for <strong>{{ q }}</strong>, in book order</p>
+  <ol class="hits standalone">
+    {% for h in hits %}
+    <li>
+      <a class="where" href="/view/{{ h.hit.file_id }}/{{ h.hit.seq }}?{{ {'q': q}|urlencode }}">{{ h.where }}</a>
+      <p class="snippet">{{ h.hit.snippet|marked }}</p>
+    </li>
+    {% endfor %}
+  </ol>
+{% endif %}
+{% endblock %}

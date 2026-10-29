@@ -1,0 +1,25 @@
+<div class="viewer-bar">
+  <div class="viewer-title">
+    {% if q %}<a class="back" href="/?{{ {'q': q}|urlencode }}">← Results</a>{% else %}<a class="back" href="/">← Search</a>{% endif %}
+    <div>
+      <h1>{{ book.title }}</h1>
+      <div class="meta">
+        <span class="tag">{{ book.topic }}</span>
+        <span class="tag kind">{{ book.kind|upper }}</span>
+        {% if book.ocr %}<span class="tag ocr" title="Text read by OCR, so highlights may miss words OCR misread">OCR</span>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% if q %}
+  <div class="match-nav">
+    {% if prev_match is not none %}<a class="btn" id="prev-match" href="/view/{{ book.id }}/{{ prev_match }}{{ qs }}#last" title="Previous match (p)">‹ Match</a>{% else %}<span class="btn disabled">‹ Match</span>{% endif %}
+    <span class="position">
+      {% if match_number %}{{ 'Page' if book.kind == 'pdf' else 'Chapter' }} with match {{ match_number }} of {{ match_total }}
+      {% elif match_total %}{{ match_total }} {{ 'page' if book.kind == 'pdf' else 'chapter' }}{{ 's' if match_total != 1 }} with matches
+      {% else %}No matches in this book{% endif %}
+    </span>
+    {% if next_match is not none %}<a class="btn" id="next-match" href="/view/{{ book.id }}/{{ next_match }}{{ qs }}" title="Next match (n)">Match ›</a>{% else %}<span class="btn disabled">Match ›</span>{% endif %}
+    <a class="btn subtle" href="/book/{{ book.id }}{{ qs }}">List</a>
+  </div>
+  {% endif %}
+</div>

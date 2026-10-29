@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% set autofocus = not q %}
+{% block title %}{% if q %}{{ q }} · {% endif %}Book-Searchie{% endblock %}
+{% block content %}
+{% if error %}
+  <div class="notice error">{{ error }}</div>
+{% elif not q %}
+  <section class="welcome">
+    <h1>Search {{ stats.books }} books</h1>
+    <p>Type a word or phrase above. Results open at the page where they were found, with your search terms highlighted.</p>
+    <table class="syntax">
+      <tr><td><code>"black cohosh"</code></td><td>exact phrase</td></tr>
+      <tr><td><code>comfrey poultice</code></td><td>pages with both words</td></tr>
+      <tr><td><code>yarrow OR calendula</code></td><td>pages with either word</td></tr>
+      <tr><td><code>root NOT valerian</code></td><td>leave out pages with a word</td></tr>
+      <tr><td><code>echinac*</code></td><td>words starting with…</td></tr>
+    </table>
+    <div class="topic-list">
+      {% for t in topics %}
+      <a class="chip" href="/?{{ {'topic': t.topic}|urlencode }}">{{ t.topic }} <span>{{ t.books }}</span></a>
+      {% endfor %}
+    </div>
+  </section>
+{% elif not books %}
+  <div class="notice">No results for <strong>{{ q }}</strong>{% if topic %} in {{ topic }}{% endif %}.
+    {% if topic %}<a href="/?{{ {'q': q}|urlencode }}">Search all topics</a>.{% endif %}</div>
+{% else %}
+  <p class="result-summary">
+    {{ hit_count }}{% if capped %}+{% endif %} matching page{{ 's' if hit_count != 1 }} in {{ book_count }}{% if capped %}+{% endif %} book{{ 's' if book_count != 1 }}{% if topic %} in <strong>{{ topic }}</strong>{% endif %}
+  </p>
+  {% for b in books %}
+  {% set first = b.hit %}
+  <article class="book">
+    <header>
+      <h2><a href="/view/{{ first.file_id }}/{{ first.seq }}?{{ {'q': q}|urlencode }}">{{ first.title }}</a></h2>
+      <div class="meta">
+        <span class="tag">{{ first.topic }}</span>
+        <span class="tag kind">{{ first.kind|upper }}</span>
+        {% if first.ocr %}<span class="tag ocr" title="Text read by OCR, so there may be small mistakes">OCR</span>{% endif %}
+        <span>{{ b.count }}{% if capped and b.count > 1 %}+{% endif %} match{{ 'es' if b.count != 1 }}</span>
+      </div>
+    </header>
+    <ol class="hits">
+      {% for h in b.hits %}
+      <li>
+        <a class="where" href="/view/{{ h.hit.file_id }}/{{ h.hit.seq }}?{{ {'q': q}|urlencode }}">{{ h.where }}</a>
+        <p class="snippet">{{ h.hit.snippet|marked }}</p>
+      </li>
+      {% endfor %}
+    </ol>
+    {% if b.count > 3 %}
+    <a class="more" href="/book/{{ first.file_id }}?{{ {'q': q}|urlencode }}">All {{ b.count }} matches in this book →</a>
+    {% endif %}
+  </article>
+  {% endfor %}
+  {% if pages > 1 %}
+  <nav class="pager">
+    {% if page_no > 1 %}<a href="{{ page_url(page_no - 1) }}">← Previous</a>{% endif %}
+    <span>Page {{ page_no }} of {{ pages }}</span>
+    {% if page_no < pages %}<a href="{{ page_url(page_no + 1) }}">Next →</a>{% endif %}
+  </nav>
+  {% endif %}
+{% endif %}
+{% endblock %}

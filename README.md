@@ -2,7 +2,7 @@
 
 **Turn a folder of PDFs and EPUBs into a searchable knowledge base, then open each result at the page where it was found.**
 
-> **Status: early development.** Phase 1 works: indexing and command-line search. The web UI is next. This README also serves as the development plan; sections marked *(planned)* do not exist yet.
+> **Status: early development.** Phases 1 and 2 work: indexing, OCR, command-line search and the web interface on your own computer. Network mode, with logins, is next. This README also serves as the development plan; sections marked *(planned)* do not exist yet.
 
 ---
 
@@ -49,7 +49,7 @@ Book-Searchie isn't on PyPI yet, so install it from a copy of this repo (see [De
 book-searchie init            # creates book-searchie.toml and asks where your library is
 book-searchie index           # builds the search index (first run can take a while)
 book-searchie search '"black cohosh" AND root*'
-book-searchie serve           # (planned) opens http://localhost:8000 in your browser
+book-searchie serve           # opens http://localhost:8004 in your browser
 ```
 
 ### Commands
@@ -57,6 +57,7 @@ book-searchie serve           # (planned) opens http://localhost:8000 in your br
 | Command | What it does |
 |---|---|
 | `init [--root FOLDER]... [--force]` | Create `book-searchie.toml` in the current folder |
+| `serve [-p PORT] [--no-browser]` | Start the web interface (default port 8004) |
 | `index [--full] [-q]` | Add new and changed books, and drop deleted ones. `--full` re-reads everything |
 | `search QUERY [-t TOPIC] [-n LIMIT]` | Search from the terminal |
 | `topics` | List topics and how many books each has |
@@ -68,6 +69,17 @@ book-searchie serve           # (planned) opens http://localhost:8000 in your br
 Every command accepts `--config FILE` to use a config file other than `./book-searchie.toml`. You can also set `BOOK_SEARCHIE_CONFIG`.
 
 Indexing can be interrupted with Ctrl+C at any time. Books finished so far are kept, and the next run carries on.
+
+### The web interface
+
+`book-searchie serve` opens the search page in your browser.
+
+- **Results are grouped by book**, best matches first, with up to three highlighted snippets each and a link to all of a book's matches.
+- **Click a result** to open the page. PDF pages appear as images with your terms highlighted; EPUB chapters appear as text, scrolled to the first highlight.
+- **Move around** with the buttons, or the keyboard: `←` / `→` for the previous or next page or chapter, `n` / `p` for the next or previous match, and `+` / `-` / `0` to zoom PDF pages.
+- **The "Can't search" page** lists books that can't be searched and why. For scanned books there's an OCR button for each book and one for all of them, with live page-by-page progress. You can leave the page while OCR runs; it carries on in the background, and the books become searchable as each one finishes.
+
+In local mode the server only answers requests from this computer. It also refuses requests whose address isn't `localhost`, which stops other websites from reaching it through your browser.
 
 ## Configuration
 
@@ -86,7 +98,7 @@ path = "book-searchie.db"         # SQLite index file
 [server]
 mode = "local"                    # "local" or "network" (see below)
 host = "127.0.0.1"
-port = 8000
+port = 8004
 ```
 
 Environment variables override the config file, which is handy for Docker:
@@ -118,7 +130,7 @@ book-searchie serve
 Run Book-Searchie on a home server, NAS or always-on PC, and use it from phones, tablets and laptops on your network.
 
 ```bash
-book-searchie serve --mode network        # listens on 0.0.0.0:8000
+book-searchie serve --mode network        # listens on 0.0.0.0:8004
 ```
 
 In network mode:
@@ -144,7 +156,7 @@ services:
   book-searchie:
     image: ghcr.io/<your-github-user>/book-searchie:latest
     ports:
-      - "8000:8000"
+      - "8004:8004"
     volumes:
       - /path/to/your/library:/library:ro    # mounted read-only
       - ./data:/data                          # index + config + users
@@ -262,11 +274,12 @@ It takes roughly 1–3 seconds per page. Ctrl+C stops at any point: finished boo
 - [x] Optional OCR for scanned PDFs (`book-searchie ocr`), without modifying the library
 
 ### Phase 2: Web UI (local mode)
-- [ ] Search page with topic dropdown
-- [ ] Results grouped by book, with highlighted snippets
-- [ ] PDF page viewer with highlighted matches
-- [ ] EPUB chapter viewer, scrolled to the match
-- [ ] Previous/next match navigation within a book
+- [x] Search page with topic dropdown
+- [x] Results grouped by book, with highlighted snippets
+- [x] PDF page viewer with highlighted matches
+- [x] EPUB chapter viewer, scrolled to the match
+- [x] Previous/next match navigation within a book
+- [x] "Can't search" page, with OCR buttons and live progress
 
 ### Phase 3: Network mode
 - [ ] `--mode network` with user accounts and login

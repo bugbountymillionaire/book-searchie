@@ -67,7 +67,7 @@ def fake_ocr(monkeypatch):
     """Stand in for OCRmyPDF: the 'OCR'd copy' is a PDF with known text."""
     calls = []
 
-    def ocr_pdf(src, dest, language, *, progress_bar=False):
+    def ocr_pdf(src, dest, language, **kwargs):
         calls.append(src)
         dest.parent.mkdir(parents=True, exist_ok=True)
         make_pdf(dest, ["Hawthorn berries support the heart. " * 3, "Second page of recognised text. " * 3])
@@ -146,4 +146,4 @@ def test_report_explains_fixes(config, db, library, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Scanned books" in out and "Herbalism/Scanned.pdf  (2 pages)" in out
     assert "Herbalism/Shop.pdf  (Adobe Digital Editions)" in out
-    assert "DRM-free copy" in out
+    assert "DRM-free copy" in " ".join(out.split())

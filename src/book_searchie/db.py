@@ -102,7 +102,8 @@ class Database:
         if not create and not path.exists():
             raise IndexUnavailable(f"No index at {path}. Run 'book-searchie index' first.")
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(path)
+        # Wait rather than fail if another process (indexing, OCR) is writing.
+        conn = sqlite3.connect(path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
@@ -181,8 +182,17 @@ class Database:
 
     def problem_files(self) -> list[sqlite3.Row]:
         return self.conn.execute(
-            "SELECT path, topic, rel, kind, status, message, content_hash, ocr, units FROM files"
+            "SELECT id, path, topic, rel, kind, status, message, content_hash, ocr, units FROM files"
             " WHERE status != 'ok' ORDER BY status, topic, rel"
+        ).fetchall()
+
+    def get_file(self, file_id: int) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM files WHERE id = ?", (file_id,)).fetchone()
+
+    def sections(self, file_id: int) -> list[sqlite3.Row]:
+        """A book's indexed pages or chapters (seq, label, href), in order."""
+        return self.conn.execute(
+            "SELECT seq, label, href FROM sections WHERE file_id = ? ORDER BY seq", (file_id,)
         ).fetchall()
 
     def ocr_count(self) -> int:

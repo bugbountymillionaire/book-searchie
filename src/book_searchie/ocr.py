@@ -60,10 +60,29 @@ def check_available() -> None:
         raise OcrUnavailable("OCRmyPDF isn't installed.\n\n" + INSTALL_HELP) from None
 
 
-def ocr_pdf(src: Path, dest: Path, language: str, *, progress_bar: bool = False) -> None:
-    """OCR src into dest. Pages that already have text are left as they are."""
+def ocr_pdf(
+    src: Path,
+    dest: Path,
+    language: str,
+    *,
+    progress_bar: bool = False,
+    on_pages: Callable[[str, float, float | None], None] | None = None,
+) -> None:
+    """OCR src into dest. Pages that already have text are left as they are.
+
+    progress_bar draws OCRmyPDF's own terminal bar; on_pages(step, done, total)
+    receives page progress instead.
+    """
     import ocrmypdf
     from ocrmypdf.exceptions import ExitCodeException, MissingDependencyError
+
+    plugins = []
+    if on_pages is not None:
+        from . import ocr_progress
+
+        ocr_progress.callback = on_pages
+        plugins.append("book_searchie.ocr_progress")
+        progress_bar = True  # progress is only reported when the bar is enabled
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_suffix(".partial.pdf")
@@ -75,6 +94,7 @@ def ocr_pdf(src: Path, dest: Path, language: str, *, progress_bar: bool = False)
             skip_text=True,  # keep pages that already have text, OCR only the image pages
             output_type="pdf",  # plain PDF; we don't need PDF/A
             progress_bar=progress_bar,
+            plugins=plugins,
         )
         os.replace(partial, dest)
     except MissingDependencyError as e:
@@ -121,16 +141,34 @@ def run_ocr(
     rows: list,
     *,
     language: str = "eng",
-    progress: Callable[[str], None] = lambda msg: None,
+    events: Callable[[dict], None] = lambda event: None,
+    page_progress: bool = False,
 ) -> OcrReport:
+    """OCR each book, reporting progress as events:
+
+    {"type": "book", "index", "total", "rel", "pages"} as each book starts,
+    {"type": "pages", "step", "done", "total"} as pages finish (only with page_progress),
+    {"type": "done", "rel"} or {"type": "failed", "rel", "error"} as each book ends.
+    """
     check_available()
     report = OcrReport()
-    show_bar = sys.stderr.isatty()
+
+    def on_pages(step: str, done: float, total: float | None) -> None:
+        events({"type": "pages", "step": step, "done": int(done), "total": total})
+
     for i, row in enumerate(rows, 1):
-        progress(f"[{i}/{len(rows)}] {row['rel']} ({row['units']} pages)")
+        events({"type": "book", "index": i, "total": len(rows), "rel": row["rel"], "pages": row["units"]})
         try:
-            ocr_pdf(Path(row["path"]), ocr_copy_path(config, row["content_hash"]), language, progress_bar=show_bar)
+            ocr_pdf(
+                Path(row["path"]),
+                ocr_copy_path(config, row["content_hash"]),
+                language,
+                progress_bar=not page_progress and sys.stderr.isatty(),
+                on_pages=on_pages if page_progress else None,
+            )
             report.done.append(row["rel"])
+            events({"type": "done", "rel": row["rel"]})
         except OcrFailed as e:
             report.failed.append((row["rel"], str(e)))
+            events({"type": "failed", "rel": row["rel"], "error": str(e)})
     return report

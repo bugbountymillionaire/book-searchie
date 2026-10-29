@@ -24,7 +24,7 @@ class Config:
     index_path: Path = Path("book-searchie.db")
     mode: str = "local"
     host: str = "127.0.0.1"
-    port: int = 8000
+    port: int = 8004
     source: Path | None = None  # the config file this was loaded from, if any
 
 
@@ -106,7 +106,7 @@ def _build(data: dict, base: Path, source: Path | None) -> Config:
     if mode not in MODES:
         raise ConfigError(f"[server] mode must be one of {', '.join(MODES)}, not {mode!r}")
     try:
-        port = int(server.get("port", 8000))
+        port = int(server.get("port", 8004))
     except ValueError:
         raise ConfigError(f"[server] port must be a number, not {server.get('port')!r}") from None
 
@@ -143,5 +143,5 @@ path = "book-searchie.db"         # SQLite index file, relative to this config f
 [server]
 mode = "local"                    # "local" or "network"
 host = "127.0.0.1"
-port = 8000
+port = 8004
 """

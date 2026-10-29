@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Can't search · Book-Searchie{% endblock %}
+{% block content %}
+<h1>Books that can't be searched</h1>
+{% if not groups %}
+  <div class="notice ok">Every book in your library is searchable.{% if ocr_count %} {{ ocr_count }} of them were made searchable with OCR.{% endif %}</div>
+{% else %}
+  <p class="lede">These books are in your library but their text can't be searched yet. Each group explains why, and how to fix it.
+  {% if ocr_count %}{{ ocr_count }} book{{ 's' if ocr_count != 1 }} {{ 'have' if ocr_count != 1 else 'has' }} already been made searchable with OCR.{% endif %}</p>
+{% endif %}
+
+<section class="ocr-panel" id="ocr-panel" data-waiting="{{ ocr_waiting }}" {% if not ocr_waiting %}hidden{% endif %}>
+  {% if ocr_help %}
+    <h2>OCR isn't set up yet</h2>
+    <p>To make scanned books searchable from here, install the OCR extras, then restart <code>book-searchie serve</code>:</p>
+    <pre>{{ ocr_help }}</pre>
+  {% else %}
+    <div id="ocr-start" class="ocr-start">
+      <div>
+        <h2>Make scanned books searchable</h2>
+        <p>{{ ocr_waiting }} scanned book{{ 's' if ocr_waiting != 1 }}, {{ "{:,}".format(ocr_waiting_pages) }} pages.
+           At roughly 1–3 seconds a page, that's about {{ ((ocr_waiting_pages * 2 / 60)|round|int) }} minutes.
+           Your files aren't changed: OCR'd copies are saved in <code>{{ ocr_dir }}</code>.</p>
+      </div>
+      <div class="ocr-actions">
+        <label>Language <input id="ocr-language" value="eng" size="8" title="Tesseract language code(s), e.g. eng, deu, eng+fra"></label>
+        <button class="primary" type="button" id="ocr-all">OCR all {{ ocr_waiting }} book{{ 's' if ocr_waiting != 1 }}</button>
+      </div>
+    </div>
+    <div id="ocr-status" class="ocr-status" hidden>
+      <div class="ocr-status-head">
+        <strong id="ocr-title">OCR running…</strong>
+        <button type="button" id="ocr-cancel">Stop</button>
+      </div>
+      <div id="ocr-current" class="ocr-current"></div>
+      <div class="progress"><div id="ocr-bar"></div></div>
+      <div id="ocr-detail" class="dim"></div>
+      <ul id="ocr-results" class="ocr-results"></ul>
+    </div>
+    <div id="ocr-error" class="notice error" hidden></div>
+  {% endif %}
+</section>
+
+{% for kind, members in groups.items() %}
+{% set p = problems[kind] %}
+<section class="problem-group">
+  <h2>{{ p.title }} <span class="count">{{ members|length }}</span></h2>
+  <p>{{ p.explanation }} <strong>Fix:</strong> {{ p.fix }}</p>
+  <ul class="problem-list">
+    {% for m in members %}
+    <li>
+      <span class="file">{{ m.row.rel }}</span>
+      {% if m.detail %}<span class="dim">{{ m.detail }}</span>{% endif %}
+      {% if kind == 'no_text' and not ocr_help %}
+      <button type="button" class="small" data-ocr-id="{{ m.row.id }}">OCR this book</button>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endfor %}
+{% endblock %}
+{% block scripts %}<script src="/static/problems.js?v={{ version }}"></script>{% endblock %}
