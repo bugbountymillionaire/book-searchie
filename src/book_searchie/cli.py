@@ -124,7 +124,7 @@ def cmd_index(args) -> int:
     for root in report.missing_roots:
         print(f"warning: library folder not found, skipped: {root}", file=sys.stderr)
     print(
-        f"Done: {report.added} added, {report.updated} updated, {report.removed} removed, "
+        f"Done: {report.added} added, {report.updated} updated, {report.moved} moved, {report.removed} removed, "
         f"{report.unchanged} unchanged. Index has {stats['books']} books."
     )
     if report.duplicates:

@@ -235,6 +235,7 @@ Example configs for both would be included in `docs/`.
 ### Indexing
 
 - **One-time and incremental:** each file's size and modified time are recorded, so re-indexing only processes new or changed files, and removes entries for deleted ones.
+- **Moves and renames are recognised:** a file that turns up elsewhere in the library with the same size, modified time and type is treated as the same book. Its topic and title are updated without reading it again, and links to its pages keep working. If that can't tell two identical files apart, they're simply read again.
 - **Text normalisation:** ligatures (`ﬁ` becomes `fi`), odd whitespace and hyphenated line breaks are cleaned up so searches match.
 - **Problem books are reported, not skipped silently.** See below.
 

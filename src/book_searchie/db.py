@@ -161,6 +161,14 @@ class Database:
         with self.conn:
             self._delete(file_id)
 
+    def move_file(self, file_id: int, f: LibraryFile) -> None:
+        """Point an indexed book at its new location, keeping its text, status and id."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE files SET path = ?, root = ?, rel = ?, topic = ?, title = ? WHERE id = ?",
+                (str(f.path), str(f.root), f.rel, f.topic, f.path.stem, file_id),
+            )
+
     def _delete(self, file_id: int) -> None:
         self.conn.execute("DELETE FROM sections WHERE file_id = ?", (file_id,))
         self.conn.execute("DELETE FROM files WHERE id = ?", (file_id,))

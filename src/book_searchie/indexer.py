@@ -6,6 +6,7 @@ import os
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .config import Config
 from .db import Database, FileState
@@ -19,6 +20,7 @@ class IndexReport:
     added: int = 0
     updated: int = 0
     removed: int = 0
+    moved: int = 0  # moved or renamed, recognised without reading them again
     unchanged: int = 0
     duplicates: int = 0  # copies of a book in another format, not searched
     missing_roots: list[str] = field(default_factory=list)
@@ -49,10 +51,22 @@ def run_index(
     found = {str(f.path): f for f in scan_library(roots, config.extensions, config.exclude)}
 
     # Files under a missing root are kept, in case the drive comes back.
-    for path, state in known.items():
-        if path not in found and state.root not in report.missing_roots:
-            db.remove_file(state.id)
-            report.removed += 1
+    gone = {p: s for p, s in known.items() if p not in found and s.root not in report.missing_roots}
+    arrived = [f for p, f in found.items() if p not in known]
+    moved = set()
+    for f, old_path in _match_moves(gone, arrived):
+        state = gone.pop(old_path)
+        db.move_file(state.id, f)
+        known[str(f.path)] = known.pop(old_path)
+        moved.add(str(f.path))
+    report.moved = len(moved)
+    for state in gone.values():
+        db.remove_file(state.id)
+        report.removed += 1
+
+    def unchanged(f: LibraryFile) -> None:
+        if str(f.path) not in moved:  # those are counted as moved
+            report.unchanged += 1
 
     def needs_indexing(f: LibraryFile, state: FileState | None) -> bool:
         return (
@@ -82,7 +96,7 @@ def run_index(
             if used is not None:
                 report.duplicates += 1
                 if state and state.status == "duplicate" and state.size == f.size and state.mtime == f.mtime:
-                    report.unchanged += 1
+                    unchanged(f)
                     continue
                 db.store_duplicate(f, used.path.name)
             elif needs_indexing(f, state):
@@ -92,7 +106,7 @@ def run_index(
                 if db.status_of(f.path) == "ok":
                     used = f
             else:
-                report.unchanged += 1
+                unchanged(f)
                 if state.status == "ok":
                     used = f
                 continue
@@ -101,6 +115,28 @@ def run_index(
             else:
                 report.updated += 1
     return report
+
+
+def _match_moves(gone: dict[str, FileState], arrived: list[LibraryFile]) -> list[tuple[LibraryFile, str]]:
+    """Pair new files with vanished ones that are the same file, moved or renamed.
+
+    Moving or renaming a file keeps its size and modified time, so a new file that matches
+    a vanished one on both (and on file type) is taken to be it. If several vanished files
+    match, the one with the same name is used; if that doesn't settle it, the file is
+    simply read again, so a wrong guess can't happen.
+    """
+    candidates: dict[tuple, list[str]] = defaultdict(list)
+    for path, state in gone.items():
+        candidates[state.size, state.mtime, Path(path).suffix.lower()].append(path)
+    pairs, taken = [], set()
+    for f in arrived:
+        options = [p for p in candidates.get((f.size, f.mtime, f.path.suffix.lower()), ()) if p not in taken]
+        if len(options) > 1:
+            options = [p for p in options if Path(p).name.casefold() == f.path.name.casefold()]
+        if len(options) == 1:
+            pairs.append((f, options[0]))
+            taken.add(options[0])
+    return pairs
 
 
 def _book_key(f: LibraryFile) -> tuple[str, str]:
