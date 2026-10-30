@@ -74,7 +74,8 @@ def _match_boxes(page, terms: list[Term]) -> list[list[pymupdf.Rect]]:
     # Same order the indexer reads the text in, which follows columns.
     words = page.get_text("words", flags=pymupdf.TEXTFLAGS_WORDS)
     lines = _line_metrics(page)
-    tokens, owners = [], []
+    tokens, owners, places = [], [], []  # places: where each token is in its word's text
+    word_tokens: dict[tuple, list[int]] = {}  # owner -> its tokens
     i = 0
     while i < len(words):
         text, owner = words[i][4], (i,)
@@ -84,19 +85,46 @@ def _match_boxes(page, terms: list[Term]) -> list[list[pymupdf.Rect]]:
             text, owner = text[:-1] + nxt[4], (i, i + 1)
             i += 1
         for m in _WORD.finditer(text):
+            word_tokens.setdefault(owner, []).append(len(tokens))
             tokens.append(fold(m.group()))
             owners.append(owner)
+            places.append((m.start(), m.end()))
         i += 1
+    textpage = None  # built on first use, for finding parts of words
     matches = []
     for start, end in find_spans(tokens, terms):
         # Merge the match's words into one box per line, so a phrase reads as one highlight.
         boxes: dict[tuple, pymupdf.Rect] = {}
-        for w in sorted({w for k in range(start, end) for w in owners[k]}):
-            key = words[w][5:7]
-            rect = _fit_to_text(pymupdf.Rect(words[w][:4]), lines.get(key))
-            boxes[key] = boxes[key] | rect if key in boxes else rect
+        for owner in dict.fromkeys(owners[k] for k in range(start, end)):
+            for w in owner:
+                key = words[w][5:7]
+                rect = pymupdf.Rect(words[w][:4])
+                inside = [k for k in word_tokens[owner] if start <= k < end]
+                text = words[w][4]
+                part = (places[inside[0]][0], places[inside[-1]][1])
+                if len(owner) == 1 and part != (0, len(text)):
+                    # Only part of the word matches: "Dovetail" in "Dovetail.—Fig.", or a
+                    # word with punctuation attached ("dovetail.").
+                    textpage = textpage or page.get_textpage(flags=pymupdf.TEXTFLAGS_SEARCH)
+                    rect = _part_of_word(page, textpage, rect, text, *part)
+                rect = _fit_to_text(rect, lines.get(key))
+                boxes[key] = boxes[key] | rect if key in boxes else rect
         matches.append(list(boxes.values()))
     return matches
+
+
+def _part_of_word(page, textpage, word: pymupdf.Rect, text: str, start: int, end: int) -> pymupdf.Rect:
+    """The box around text[start:end] within a word, or the whole word if it can't be found."""
+    part = text[start:end]
+    # search_for ignores its clip when given a textpage, so keep the hits inside this word ourselves.
+    area = word + (-1, -1, 1, 1)
+    hits = sorted(
+        (h for h in page.search_for(part, textpage=textpage) if area.contains(pymupdf.Point((h.x0 + h.x1) / 2, (h.y0 + h.y1) / 2))),
+        key=lambda h: h.x0,
+    )
+    # The part may occur more than once in the word ("dovetail-dovetail"); pick the right one.
+    nth = text.lower().count(part.lower(), 0, start)
+    return hits[nth] if nth < len(hits) else word
 
 
 def _line_metrics(page) -> dict[tuple[int, int], tuple[float, float, float, float]]:

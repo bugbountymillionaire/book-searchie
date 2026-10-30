@@ -108,6 +108,26 @@ def test_pdf_match_boxes(tmp_path):
     assert render.pdf_page(path, 0, []).matches == []
 
 
+def test_match_inside_a_longer_word_is_boxed_on_its_own(tmp_path):
+    # "Jointing" contains the letters "joint" but isn't a match; it must not attract a box.
+    path = make_pdf(tmp_path / "joint.pdf", ["Jointing. A dovetail-joint and a joint-dovetail-joint. End joint."])
+    page = pymupdf.open(path)[0]
+    w, h = page.rect.width, page.rect.height
+    words = {wd[4]: pymupdf.Rect(wd[:4]) for wd in page.get_text("words")}
+    matches = render.pdf_page(path, 0, query_terms("joint")).matches
+    boxes = [pymupdf.Rect(x0 * w, y0 * h, x1 * w, y1 * h) for (x0, y0, x1, y1), in matches]
+    assert len(boxes) == 4
+    inside = ["dovetail-joint", "joint-dovetail-joint.", "joint-dovetail-joint.", "joint."]
+    for box, word in zip(boxes, inside):
+        assert words[word].contains(box.tl + (1, 1)) and words[word].contains(box.br - (1, 1)), (box, word)
+    # Only "joint" is boxed, not the whole word: it's the right-hand part of "dovetail-joint".
+    assert boxes[0].x0 > words["dovetail-joint"].x0 + words["dovetail-joint"].width / 2
+    # "joint-dovetail-joint." holds two matches, each with its own box, in order.
+    assert boxes[1].x1 < boxes[2].x0
+    # Trailing punctuation is left out: "joint." is boxed without its full stop.
+    assert boxes[3].x1 < words["joint."].x1
+
+
 def test_oversized_word_boxes_are_fitted_to_the_text():
     # baseline 302, 11.5pt font with ascender 0.8 and descender -0.2
     metrics = (302.0, 11.5, 0.8, -0.2)
@@ -229,6 +249,8 @@ def test_problems_page(client, config, db, library):
     assert res.status_code == 200
     assert "Scanned books" in res.text and "Herbalism/Scanned.pdf" in res.text
     assert '<span class="badge">1</span>' in res.text
+    # One small book: no "about 0 minutes" or "OCR all 1 book".
+    assert "2 pages" in res.text and "under a minute" in res.text and ">OCR this book</button>" in res.text
 
 
 def test_ocr_api_needs_header(client):
