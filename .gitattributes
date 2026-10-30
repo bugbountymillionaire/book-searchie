@@ -1,2 +1,4 @@
 # Keep LF line endings in the repo on every platform
 * text=auto eol=lf
+*.cmd text eol=crlf
+*.ico binary

@@ -74,6 +74,8 @@ book-searchie search '"black cohosh" AND root*'
 book-searchie serve           # opens http://localhost:8004 in your browser
 ```
 
+**On Windows, start it with a double-click:** make a desktop shortcut to `tools\start-book-searchie.cmd` in your copy of the repo (right-click it, *Send to › Desktop (create shortcut)*), and pick `tools\book-searchie.ico` as its icon (*Properties › Change Icon*). It picks up new, changed and deleted books, then opens Book-Searchie in your browser. Close its window to stop Book-Searchie. Clicking it while Book-Searchie is already running just opens it again.
+
 ### Commands
 
 | Command | What it does |
