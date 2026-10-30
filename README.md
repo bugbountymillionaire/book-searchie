@@ -39,6 +39,8 @@ To add a topic, create a folder and re-index. No code changes are needed. Books 
 
 To leave a folder out, either start its name with an underscore (`_inbox`, `_to-sort`) or add it to `exclude` in the config. Underscore folders are skipped at any depth, along with everything inside them.
 
+If a folder has the same book in more than one format, such as `Raising Goats.pdf` and `Raising Goats.epub`, only one copy is searched so results aren't doubled up. By default it's the EPUB, which has the publisher's own text and highlights exactly. If the preferred copy can't be searched (DRM, damaged, no text), the other copy is used instead. Change the preference with `prefer` in the config. `book-searchie report` lists the copies that are skipped. Only files with exactly the same name in the same folder count as the same book (capital letters don't matter).
+
 ---
 
 ## Quick start
@@ -93,6 +95,7 @@ roots = ["E:/Knowledge"]          # one or more library folders
 extensions = ["pdf", "epub"]
 exclude = []                      # extra folders or glob patterns to skip, e.g. ["Archive", "**/drafts"]
                                   # (folders starting with "_" are always skipped)
+prefer = "epub"                   # same book as PDF and EPUB in one folder: search only this one
 
 [index]
 path = "book-searchie.db"         # SQLite index file
@@ -110,6 +113,7 @@ Environment variables override the config file, which is handy for Docker:
 | `BOOK_SEARCHIE_ROOTS` | `library.roots`, separated like `PATH` (`;` on Windows, `:` elsewhere) |
 | `BOOK_SEARCHIE_EXTENSIONS` | `library.extensions`, comma-separated |
 | `BOOK_SEARCHIE_EXCLUDE` | `library.exclude`, comma-separated |
+| `BOOK_SEARCHIE_PREFER` | `library.prefer` (`epub` or `pdf`) |
 | `BOOK_SEARCHIE_INDEX` | `index.path` |
 | `BOOK_SEARCHIE_MODE`, `_HOST`, `_PORT` | `server.mode`, `server.host`, `server.port` |
 

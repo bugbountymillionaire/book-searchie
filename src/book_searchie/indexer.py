@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -18,6 +20,7 @@ class IndexReport:
     updated: int = 0
     removed: int = 0
     unchanged: int = 0
+    duplicates: int = 0  # copies of a book in another format, not searched
     missing_roots: list[str] = field(default_factory=list)
 
 
@@ -51,22 +54,58 @@ def run_index(
             db.remove_file(state.id)
             report.removed += 1
 
-    todo = []
-    for path, f in found.items():
-        state = known.get(path)
-        if state is not None and state.size == f.size and state.mtime == f.mtime and not _ocr_changed(config, state):
-            report.unchanged += 1
-        else:
-            todo.append((f, state is None))
+    def needs_indexing(f: LibraryFile, state: FileState | None) -> bool:
+        return (
+            state is None or state.size != f.size or state.mtime != f.mtime
+            or state.status == "duplicate"  # it was skipped, so its text was never read
+            or _ocr_changed(config, state)
+        )
 
-    for i, (f, is_new) in enumerate(todo, 1):
-        progress(f"[{i}/{len(todo)}] {f.rel}")
-        _index_file(config, db, f)
-        if is_new:
-            report.added += 1
-        else:
-            report.updated += 1
+    # The same book in several formats in one folder ("Herbs.pdf", "Herbs.epub") is
+    # searched once: the preferred format, or failing that the next one that works.
+    rank = [config.prefer] + [k for k in ("pdf", "epub") if k != config.prefer]
+    books: dict[tuple[str, str], list[LibraryFile]] = defaultdict(list)
+    for f in found.values():
+        books[_book_key(f)].append(f)
+
+    # For progress. Copies skipped last time usually stay skipped, so they aren't counted.
+    total = sum(
+        needs_indexing(f, s) and not (s and s.status == "duplicate" and s.size == f.size and s.mtime == f.mtime)
+        for f, s in ((f, known.get(path)) for path, f in found.items())
+    )
+    done = 0
+    for copies in books.values():
+        copies.sort(key=lambda f: rank.index(f.kind))
+        used: LibraryFile | None = None  # the copy being searched
+        for f in copies:
+            state = known.get(str(f.path))
+            if used is not None:
+                report.duplicates += 1
+                if state and state.status == "duplicate" and state.size == f.size and state.mtime == f.mtime:
+                    report.unchanged += 1
+                    continue
+                db.store_duplicate(f, used.path.name)
+            elif needs_indexing(f, state):
+                done += 1
+                progress(f"[{done}/{max(done, total)}] {f.rel}")
+                _index_file(config, db, f)
+                if db.status_of(f.path) == "ok":
+                    used = f
+            else:
+                report.unchanged += 1
+                if state.status == "ok":
+                    used = f
+                continue
+            if state is None:
+                report.added += 1
+            else:
+                report.updated += 1
     return report
+
+
+def _book_key(f: LibraryFile) -> tuple[str, str]:
+    """Files with the same name in the same folder, ignoring case and extension."""
+    return os.path.normcase(str(f.path.parent)), f.path.stem.casefold()
 
 
 def _ocr_changed(config: Config, state: FileState) -> bool:

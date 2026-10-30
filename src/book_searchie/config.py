@@ -21,6 +21,9 @@ class Config:
     roots: list[Path]
     extensions: list[str] = field(default_factory=lambda: ["pdf", "epub"])
     exclude: list[str] = field(default_factory=list)
+    # When a folder has the same book in several formats ("Herbs.pdf" and "Herbs.epub"),
+    # only this format is searched, unless it can't be, when the next one is used.
+    prefer: str = "epub"
     index_path: Path = Path("book-searchie.db")
     mode: str = "local"
     host: str = "127.0.0.1"
@@ -38,6 +41,7 @@ _ENV = {
     "ROOTS": ("library", "roots", lambda v: _split_list(v, os.pathsep)),
     "EXTENSIONS": ("library", "extensions", lambda v: _split_list(v, ",")),
     "EXCLUDE": ("library", "exclude", lambda v: _split_list(v, ",")),
+    "PREFER": ("library", "prefer", str),
     "INDEX": ("index", "path", str),
     "MODE": ("server", "mode", str),
     "HOST": ("server", "host", str),
@@ -102,6 +106,10 @@ def _build(data: dict, base: Path, source: Path | None) -> Config:
     if unsupported:
         raise ConfigError(f"Unsupported extensions: {', '.join(sorted(unsupported))} (only pdf and epub)")
 
+    prefer = str(library.get("prefer", "epub")).lower().lstrip(".")
+    if prefer not in ("pdf", "epub"):
+        raise ConfigError(f"[library] prefer must be \"pdf\" or \"epub\", not {prefer!r}")
+
     mode = server.get("mode", "local")
     if mode not in MODES:
         raise ConfigError(f"[server] mode must be one of {', '.join(MODES)}, not {mode!r}")
@@ -114,6 +122,7 @@ def _build(data: dict, base: Path, source: Path | None) -> Config:
         roots=[(base / r).resolve() for r in roots],
         extensions=extensions,
         exclude=list(library.get("exclude", [])),
+        prefer=prefer,
         index_path=(base / index.get("path", "book-searchie.db")).resolve(),
         mode=mode,
         host=server.get("host", "0.0.0.0" if mode == "network" else "127.0.0.1"),
@@ -136,6 +145,7 @@ roots = [{roots_toml}]          # one or more library folders
 extensions = ["pdf", "epub"]
 exclude = []                      # extra folders or glob patterns to skip, e.g. ["Archive", "**/drafts"]
                                   # (folders starting with "_" are always skipped)
+prefer = "epub"                   # same book as PDF and EPUB in one folder: search only this one
 
 [index]
 path = "book-searchie.db"         # SQLite index file, relative to this config file

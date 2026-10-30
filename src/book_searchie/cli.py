@@ -127,6 +127,11 @@ def cmd_index(args) -> int:
         f"Done: {report.added} added, {report.updated} updated, {report.removed} removed, "
         f"{report.unchanged} unchanged. Index has {stats['books']} books."
     )
+    if report.duplicates:
+        print(
+            f"{report.duplicates} book(s) are also in their folder in another format; only one copy of each "
+            f"is searched. Run 'book-searchie report' to see which."
+        )
     groups = group_problems(problems)
     if groups:
         parts = [f"{len(rows)} {PROBLEMS[kind].summary}" for kind, rows in groups.items()]
@@ -176,10 +181,10 @@ def cmd_report(args) -> int:
     config = load_config(args.config)
     with _open_index(config) as db:
         problems = db.problem_files()
-    if not problems:
-        print("Every indexed book is searchable.")
-        return 0
+        duplicates = db.duplicate_files()
     wrap = textwrap.TextWrapper(width=100, initial_indent="  ", subsequent_indent="  ", break_on_hyphens=False)
+    if not problems:
+        print("Every indexed book is searchable.\n")
     for kind, rows in group_problems(problems).items():
         problem = PROBLEMS[kind]
         print(f"{problem.title}: {len(rows)}")
@@ -187,6 +192,15 @@ def cmd_report(args) -> int:
             extra = detail(kind, row)
             print(f"  {row['rel']}" + (f"  ({extra})" if extra else ""))
         print(wrap.fill(f"{problem.explanation} Fix: {problem.fix}") + "\n")
+    if duplicates:
+        print(f"Not searched, as the same book is in the folder in another format: {len(duplicates)}")
+        for row in duplicates:
+            print(f"  {row['rel']}")
+        print(wrap.fill(
+            f"Only one copy of each book is searched, so results aren't doubled up: the {config.prefer.upper()}, "
+            "unless it can't be searched, when another copy is used instead. Change the preferred format "
+            "with 'prefer' in the [library] section of the config."
+        ) + "\n")
     return 0
 
 

@@ -25,7 +25,7 @@ CREATE TABLE files (
     kind TEXT NOT NULL,
     size INTEGER NOT NULL,
     mtime REAL NOT NULL,
-    status TEXT NOT NULL,          -- ok | no_text | password | drm | error
+    status TEXT NOT NULL,          -- ok | no_text | password | drm | error | duplicate
     message TEXT,
     content_hash TEXT,             -- sha256, recorded for scanned PDFs to find their OCR copy
     ocr INTEGER NOT NULL DEFAULT 0, -- 1 if the text came from an OCR copy
@@ -180,11 +180,24 @@ class Database:
                     ((cur.lastrowid, s.seq, s.label, s.href, s.text) for s in extracted.sections),
                 )
 
+    def store_duplicate(self, f: LibraryFile, used: str) -> None:
+        """Record a second copy of a book in another format, without reading its text."""
+        self.store_file(f, None, status="duplicate", message=f"The same book as {used}, which is searched instead.")
+
     def problem_files(self) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT id, path, topic, rel, kind, status, message, content_hash, ocr, units FROM files"
-            " WHERE status != 'ok' ORDER BY status, topic, rel"
+            " WHERE status NOT IN ('ok', 'duplicate') ORDER BY status, topic, rel"
         ).fetchall()
+
+    def duplicate_files(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT id, topic, rel, kind, message FROM files WHERE status = 'duplicate' ORDER BY topic, rel"
+        ).fetchall()
+
+    def status_of(self, path: Path) -> str | None:
+        row = self.conn.execute("SELECT status FROM files WHERE path = ?", (str(path),)).fetchone()
+        return row["status"] if row else None
 
     def get_file(self, file_id: int) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM files WHERE id = ?", (file_id,)).fetchone()
@@ -200,10 +213,11 @@ class Database:
 
     def topics(self) -> list[sqlite3.Row]:
         return self.conn.execute(
-            "SELECT topic, COUNT(*) AS books FROM files GROUP BY topic ORDER BY topic COLLATE NOCASE"
+            "SELECT topic, COUNT(*) AS books FROM files WHERE status != 'duplicate'"
+            " GROUP BY topic ORDER BY topic COLLATE NOCASE"
         ).fetchall()
 
     def stats(self) -> sqlite3.Row:
         return self.conn.execute(
-            "SELECT COUNT(*) AS books, COALESCE(SUM(units), 0) AS units FROM files"
+            "SELECT COUNT(*) AS books, COALESCE(SUM(units), 0) AS units FROM files WHERE status != 'duplicate'"
         ).fetchone()
