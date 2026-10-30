@@ -21,13 +21,14 @@ from ..highlight import query_terms, text_spans
 from ..ocr import INSTALL_HELP, OcrUnavailable, check_available, ocr_candidates, ocr_copy_path, ocr_dir
 from ..problems import PROBLEMS, detail, group_problems
 from ..search import QueryError, fill_snippets, matching_seqs, search
-from . import render
+from . import opener, render
 from .jobs import OcrBusy, OcrJob
 
 HERE = Path(__file__).parent
 BOOKS_PER_PAGE = 10
 MAX_HITS = 1000
 PAGE_DPI = 150
+BOOK_SUFFIXES = {".pdf", ".epub"}
 # Private-use characters mark matches in snippets, so they survive HTML escaping.
 MARK_OPEN, MARK_CLOSE = "", ""
 _HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -52,6 +53,10 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
     # Stylesheets and scripts are linked with a fingerprint of their contents, so a
     # browser never keeps using an old copy after they change.
     templates.env.globals["static_version"] = _static_fingerprint()
+    # Opening a file happens on the computer running the server, which is only the
+    # computer you're using in local mode.
+    can_open = config.mode == "local"
+    templates.env.globals["can_open"] = can_open
     job = OcrJob(config)
 
     def open_db() -> Database:
@@ -80,6 +85,9 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
             copy = ocr_copy_path(config, row["content_hash"])
             if copy.is_file():
                 return copy
+        return original_path(row)
+
+    def original_path(row) -> Path:
         path = Path(row["path"]).resolve()
         if not any(path.is_relative_to(root) for root in config.roots) or not path.is_file():
             raise HTTPException(404, "The book's file can't be found. It may have been moved; re-index.")
@@ -207,6 +215,24 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
         except KeyError:
             raise HTTPException(404, "No such image.") from None
         return Response(data, media_type=media_type, headers={"Cache-Control": "private, max-age=86400"})
+
+    @app.post("/api/open/{file_id}")
+    def open_file(file_id: int, x_book_searchie: str | None = Header(default=None)):
+        _require_app_header(x_book_searchie)
+        if not can_open:
+            raise HTTPException(404, "Opening files is only available in local mode.")
+        with open_db() as db:
+            row = book_or_404(db, file_id)
+        # Always the original, never the OCR copy. Only book files are ever opened, so a
+        # tampered index can't make us run a program.
+        path = original_path(row)
+        if path.suffix.lower() not in BOOK_SUFFIXES:
+            raise HTTPException(400, "That isn't a book file.")
+        try:
+            opener.open_in_default_app(path)
+        except opener.OpenFailed as e:
+            raise HTTPException(500, str(e)) from None
+        return {"opened": path.name}
 
     # --- Can't search / OCR ------------------------------------------------
 

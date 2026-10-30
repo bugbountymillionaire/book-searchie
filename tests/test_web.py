@@ -6,7 +6,7 @@ from book_searchie import ocr
 from book_searchie.highlight import query_terms, text_spans
 from book_searchie.indexer import run_index
 from book_searchie.web.app import create_app
-from book_searchie.web import render
+from book_searchie.web import opener, render
 from book_searchie.web.render import render_epub_chapter
 
 from .conftest import make_epub, make_pdf
@@ -170,6 +170,56 @@ def test_book_outside_library_is_refused(client, config, db, tmp_path):
     db.conn.execute("UPDATE files SET path = ? WHERE id = ?", (str(outside), fid))
     db.conn.commit()
     assert client.get(f"/page/{fid}/0.png").status_code == 404
+
+
+@pytest.fixture
+def opened(monkeypatch):
+    """Records files the app asks the OS to open, instead of opening them."""
+    calls = []
+    monkeypatch.setattr(opener, "open_in_default_app", calls.append)
+    return calls
+
+
+def test_open_file(client, db, library, opened):
+    fid = _file_id(db, "Culpeper")
+    assert 'id="open-file"' in client.get(f"/view/{fid}/0").text
+    assert client.post(f"/api/open/{fid}").status_code == 403  # needs the app's header
+    res = client.post(f"/api/open/{fid}", headers=H)
+    assert res.status_code == 200 and res.json() == {"opened": "Culpeper.pdf"}
+    assert opened == [(library / "Herbalism" / "Culpeper.pdf").resolve()]
+    assert client.post("/api/open/9999", headers=H).status_code == 404
+
+
+def test_open_file_refuses_non_books_and_outsiders(client, db, library, tmp_path, opened):
+    fid = _file_id(db, "Joinery")
+    script = library / "Woodwork" / "run.bat"
+    script.write_text("echo hi")
+    db.conn.execute("UPDATE files SET path = ? WHERE id = ?", (str(script), fid))
+    db.conn.commit()
+    assert client.post(f"/api/open/{fid}", headers=H).status_code == 400
+    outside = make_pdf(tmp_path / "outside.pdf", ["private"])
+    db.conn.execute("UPDATE files SET path = ? WHERE id = ?", (str(outside), fid))
+    db.conn.commit()
+    assert client.post(f"/api/open/{fid}", headers=H).status_code == 404
+    assert opened == []
+
+
+def test_open_file_reports_failure(client, db, monkeypatch):
+    def fail(path):
+        raise opener.OpenFailed("Couldn't open the file: no app for this type")
+
+    monkeypatch.setattr(opener, "open_in_default_app", fail)
+    res = client.post(f"/api/open/{_file_id(db, 'Culpeper')}", headers=H)
+    assert res.status_code == 500 and "no app" in res.json()["error"]
+
+
+def test_open_file_is_local_mode_only(client, config, db, opened):
+    config.mode = "network"  # `client` above has built the index; make a network-mode app over it
+    client = TestClient(create_app(config, allowed_hosts=["testserver"]))
+    fid = _file_id(db, "Culpeper")
+    assert 'id="open-file"' not in client.get(f"/view/{fid}/0").text
+    assert client.post(f"/api/open/{fid}", headers=H).status_code == 404
+    assert opened == []
 
 
 def test_problems_page(client, config, db, library):

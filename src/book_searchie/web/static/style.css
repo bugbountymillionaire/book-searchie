@@ -128,6 +128,7 @@ button.small { padding: 3px 9px; font-size: 0.85rem; }
   padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
 }
 .viewer-tools { background: var(--surface-2); padding: 6px 16px; }
+.viewer-tools .group:first-child { margin-right: auto; }  /* page controls left, the rest right */
 .viewer-title { display: flex; align-items: center; gap: 16px; min-width: 0; }
 .viewer-title h1 { font-size: 1.1rem; margin: 0; overflow-wrap: anywhere; }
 .back { white-space: nowrap; }
@@ -203,5 +204,6 @@ a.btn:hover { text-decoration: none; border-color: var(--accent); }
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .btn { padding: 4px 9px; }
+  .wide-only { display: none; }
   h1 { font-size: 1.4rem; }
 }

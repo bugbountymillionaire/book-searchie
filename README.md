@@ -75,8 +75,10 @@ Indexing can be interrupted with Ctrl+C at any time. Books finished so far are k
 `book-searchie serve` opens the search page in your browser.
 
 - **Results are grouped by book**, best matches first, with up to three highlighted snippets each and a link to all of a book's matches.
-- **Click a result** to open the page. PDF pages appear as images with your terms highlighted; EPUB chapters appear as text, scrolled to the first highlight.
-- **Move around** with the buttons, or the keyboard: `←` / `→` for the previous or next page or chapter, `n` / `p` for the next or previous match, and `+` / `-` / `0` to zoom PDF pages.
+- **Click a result** to open the page, scrolled to the first match. PDF pages appear as images with your terms highlighted; EPUB chapters appear as text.
+- **Step through matches** with the Match buttons. They go through each match on the page, then on to the next page with one, and wrap round from the last match in the book to the first. The navigation bars stay at the top of the screen as you scroll.
+- **Open the book in your usual app** (Adobe Reader, Calibre and so on) with *Open file*. This always opens your original file, not the OCR copy, and is only available in local mode.
+- **Keyboard:** `←` / `→` previous or next page or chapter, `n` / `p` next or previous match, `o` open file, `+` / `-` / `0` zoom PDF pages.
 - **The "Can't search" page** lists books that can't be searched and why. For scanned books there's an OCR button for each book and one for all of them, with live page-by-page progress. You can leave the page while OCR runs; it carries on in the background, and the books become searchable as each one finishes.
 
 In local mode the server only answers requests from this computer. It also refuses requests whose address isn't `localhost`, which stops other websites from reaching it through your browser.

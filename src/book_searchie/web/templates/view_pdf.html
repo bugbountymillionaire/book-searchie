@@ -6,15 +6,20 @@
 {% include "_viewer_bar.html" %}
 <div class="viewer-tools">
   <div class="group">
-    {% if seq > 0 %}<a class="btn" id="prev-page" href="/view/{{ book.id }}/{{ seq - 1 }}{{ qs }}" title="Previous page (←)">‹ Page</a>{% else %}<span class="btn disabled">‹ Page</span>{% endif %}
+    {% if seq > 0 %}<a class="btn" id="prev-page" href="/view/{{ book.id }}/{{ seq - 1 }}{{ qs }}" title="Previous page (←)">‹<span class="wide-only"> Page</span></a>{% else %}<span class="btn disabled">‹<span class="wide-only"> Page</span></span>{% endif %}
     <span class="position">Page {{ label }} <span class="dim">({{ seq + 1 }} of {{ page_count }})</span></span>
-    {% if seq + 1 < page_count %}<a class="btn" id="next-page" href="/view/{{ book.id }}/{{ seq + 1 }}{{ qs }}" title="Next page (→)">Page ›</a>{% else %}<span class="btn disabled">Page ›</span>{% endif %}
+    {% if seq + 1 < page_count %}<a class="btn" id="next-page" href="/view/{{ book.id }}/{{ seq + 1 }}{{ qs }}" title="Next page (→)"><span class="wide-only">Page </span>›</a>{% else %}<span class="btn disabled"><span class="wide-only">Page </span>›</span>{% endif %}
   </div>
   <div class="group">
     <button class="btn" type="button" data-zoom="-1" title="Zoom out (-)">−</button>
     <button class="btn" type="button" data-zoom="0" title="Fit width (0)" id="zoom-label">100%</button>
     <button class="btn" type="button" data-zoom="1" title="Zoom in (+)">+</button>
   </div>
+  {% if can_open %}
+  <div class="group">
+    <button class="btn" type="button" id="open-file" data-book="{{ book.id }}" title="Open the original file in your usual app for it (o)">Open<span class="wide-only"> file</span> ↗</button>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
 {% block content %}

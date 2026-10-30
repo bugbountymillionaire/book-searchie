@@ -142,6 +142,27 @@
     });
   }
 
+  // --- Open in the default app -------------------------------------------------
+  const openButton = $("open-file");
+  async function openFile() {
+    if (!openButton || openButton.disabled) return;
+    openButton.disabled = true;
+    try {
+      const res = await fetch(`/api/open/${openButton.dataset.book}`, {
+        method: "POST",
+        headers: { "X-Book-Searchie": "1" },
+      });
+      const body = await res.json().catch(() => ({}));
+      toast(res.ok ? "Opening in your usual app…" : body.error || "Couldn't open the file.");
+    } catch (e) {
+      toast("Couldn't reach Book-Searchie. Is it still running?");
+    } finally {
+      // Stop double-clicks opening the book twice.
+      setTimeout(() => (openButton.disabled = false), 1500);
+    }
+  }
+  if (openButton) openButton.addEventListener("click", openFile);
+
   // --- Keyboard ---------------------------------------------------------------
   document.addEventListener("keydown", (e) => {
     if (e.target.closest("input, select, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -149,6 +170,7 @@
     else if (e.key === "ArrowRight") go("next-page");
     else if (e.key === "n") step(1);
     else if (e.key === "N" || e.key === "p") step(-1);
+    else if (e.key === "o") openFile();
     else if (wrap && (e.key === "+" || e.key === "=")) stepZoom(1);
     else if (wrap && e.key === "-") stepZoom(-1);
     else if (wrap && e.key === "0") stepZoom(0);

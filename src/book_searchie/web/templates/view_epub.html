@@ -6,10 +6,15 @@
 {% include "_viewer_bar.html" %}
 <div class="viewer-tools">
   <div class="group">
-    {% if prev_chapter is not none %}<a class="btn" id="prev-page" href="/view/{{ book.id }}/{{ prev_chapter }}{{ qs }}" title="Previous chapter (←)">‹ Chapter</a>{% else %}<span class="btn disabled">‹ Chapter</span>{% endif %}
+    {% if prev_chapter is not none %}<a class="btn" id="prev-page" href="/view/{{ book.id }}/{{ prev_chapter }}{{ qs }}" title="Previous chapter (←)">‹<span class="wide-only"> Chapter</span></a>{% else %}<span class="btn disabled">‹<span class="wide-only"> Chapter</span></span>{% endif %}
     <span class="position">{{ label }} <span class="dim">({{ chapter_number }} of {{ chapter_total }})</span></span>
-    {% if next_chapter is not none %}<a class="btn" id="next-page" href="/view/{{ book.id }}/{{ next_chapter }}{{ qs }}" title="Next chapter (→)">Chapter ›</a>{% else %}<span class="btn disabled">Chapter ›</span>{% endif %}
+    {% if next_chapter is not none %}<a class="btn" id="next-page" href="/view/{{ book.id }}/{{ next_chapter }}{{ qs }}" title="Next chapter (→)"><span class="wide-only">Chapter </span>›</a>{% else %}<span class="btn disabled"><span class="wide-only">Chapter </span>›</span>{% endif %}
   </div>
+  {% if can_open %}
+  <div class="group">
+    <button class="btn" type="button" id="open-file" data-book="{{ book.id }}" title="Open the original file in your usual app for it (o)">Open<span class="wide-only"> file</span> ↗</button>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
 {% block content %}
