@@ -17,6 +17,26 @@
 - **Private by design.** It runs on your own computer and only answers requests from it. *(Hosting it on a home server for every device in the house may come later, on request.)*
 - **Cross-platform.** It runs natively on Windows, macOS and Linux. No WSL needed.
 
+## Screenshots
+
+*These use a small demo library of public-domain books from [Project Gutenberg](https://www.gutenberg.org/).*
+
+**Search results**, grouped by book, with the best matches first and your terms highlighted. Each result opens the page it came from.
+
+![Search results for "honey" across four books in three topics](docs/screenshots/search.png)
+
+**PDF pages** are shown as they're printed, with every match highlighted. The current match is outlined, and *Match ›* steps through each one, then on to the next page with a match.
+
+![A page of Woodwork Joints with each "dovetail" highlighted and the current one outlined](docs/screenshots/pdf-viewer.png)
+
+**EPUB chapters** are shown as text, scrolled to the match.
+
+![A chapter of Culpeper's Complete Herbal scrolled to a highlighted "Comfrey"](docs/screenshots/epub-viewer.png)
+
+**Books that can't be searched** are listed with the reason and a fix. Scanned books can be made searchable with OCR, without changing your files.
+
+![The "Can't search" page offering OCR for a scanned book](docs/screenshots/cant-search.png)
+
 ## How your library is organised
 
 Point Book-Searchie at one or more library folders. Each top-level subfolder becomes a topic:
@@ -296,7 +316,7 @@ It takes roughly 1–3 seconds per page. Ctrl+C stops at any point: finished boo
 
 ### Release checklist
 - [ ] Demo library of public-domain books (e.g. from Project Gutenberg) for trying it out and for tests
-- [ ] Screenshots in this README
+- [x] Screenshots in this README
 - [ ] Tests running on Windows, macOS and Linux (GitHub Actions)
 - [x] `LICENSE` file (MIT)
 - [ ] Publish to PyPI
