@@ -151,7 +151,7 @@ prefer = "epub"                   # same book as PDF and EPUB in one folder: sea
 path = "book-searchie.db"         # SQLite index file, relative to this config file
 
 [server]
-mode = "local"                    # "local" or "network"
+mode = "local"                    # only "local" for now
 host = "127.0.0.1"
 port = 8004
 """

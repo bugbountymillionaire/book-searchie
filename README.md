@@ -2,7 +2,7 @@
 
 **Turn a folder of PDFs and EPUBs into a searchable knowledge base, then open each result at the page where it was found.**
 
-> **Status: early development.** Phases 1 and 2 work: indexing, OCR, command-line search and the web interface on your own computer. Network mode, with logins, is next. This README also serves as the development plan; sections marked *(planned)* do not exist yet.
+> **Status: early development.** Phases 1 and 2 work: indexing, OCR, command-line search and the web interface on your own computer. Network access for other devices is a possible future enhancement, built if there's a need for it (see [Roadmap](#roadmap)). This README also serves as the development plan; sections marked *(planned)* or *(on request)* do not exist yet.
 
 ---
 
@@ -14,7 +14,7 @@
   - **PDF:** the page is shown as an image with your search terms highlighted.
   - **EPUB:** the chapter is shown, scrolled to the match, with the terms highlighted.
 - **Use proper search syntax.** It supports phrases (`"black cohosh"`), `AND` / `OR` / `NOT`, prefix matching (`echinac*`), and results ranked by relevance.
-- **Run it your way.** Use it privately on your own computer, or host it on a home server so every device in the house can use it.
+- **Private by design.** It runs on your own computer and only answers requests from it. *(Hosting it on a home server for every device in the house may come later, on request.)*
 - **Cross-platform.** It runs natively on Windows, macOS and Linux. No WSL needed.
 
 ## How your library is organised
@@ -101,12 +101,12 @@ prefer = "epub"                   # same book as PDF and EPUB in one folder: sea
 path = "book-searchie.db"         # SQLite index file
 
 [server]
-mode = "local"                    # "local" or "network" (see below)
+mode = "local"                    # only "local" for now (network mode may come later, on request)
 host = "127.0.0.1"
 port = 8004
 ```
 
-Environment variables override the config file, which is handy for Docker:
+Environment variables override the config file, which is handy for scripts and services:
 
 | Variable | Setting |
 |---|---|
@@ -131,7 +131,9 @@ Book-Searchie listens only on `127.0.0.1`, so only your own computer can reach i
 book-searchie serve
 ```
 
-### 2. Home server / network *(planned)*
+### 2. Home server / network *(on request)*
+
+> **Not being built for now.** This is a design sketch for a possible future enhancement. It will be built if there's a need for it, so if you'd use it, open an issue saying so and how you'd run it (always-on PC, NAS, Docker…).
 
 Run Book-Searchie on a home server, NAS or always-on PC, and use it from phones, tablets and laptops on your network.
 
@@ -152,7 +154,7 @@ In network mode:
 - **The library is read-only.** Book-Searchie never modifies, moves or deletes your books.
 - **It works on phones.** The interface is responsive, and the page viewer supports pinch-zoom.
 
-#### Docker *(planned)*
+#### Docker *(on request)*
 
 This is the easiest option for a NAS or home server:
 
@@ -178,7 +180,7 @@ Book-Searchie serves plain HTTP. On a home network that is usually fine. **Don't
 - a VPN into your home network (WireGuard, Tailscale, etc.), **recommended**, or
 - a reverse proxy with HTTPS (Caddy, Nginx, Traefik) in front of Book-Searchie.
 
-Example configs for both will be included in `docs/`.
+Example configs for both would be included in `docs/`.
 
 ---
 
@@ -194,10 +196,9 @@ Example configs for both will be included in `docs/`.
                                                         │
 ┌──────────────┐     ┌───────────────────┐              │
 │ Browser      │<───>│ Web server        │<─────────────┘
-│ (any device) │     │ FastAPI           │
-└──────────────┘     │ search · render   │
-                     │ auth (network)    │
-                     └───────────────────┘
+│ (this        │     │ FastAPI           │
+│  computer)   │     │ search · render   │
+└──────────────┘     └───────────────────┘
 ```
 
 | Component | Choice | Why |
@@ -207,7 +208,6 @@ Example configs for both will be included in `docs/`.
 | PDF text and rendering | PyMuPDF | Finds the exact position of each match; renders pages with highlights; has Windows/macOS/Linux wheels |
 | EPUB | `zipfile` + HTML parsing | EPUBs are zip files of HTML chapters |
 | Web | FastAPI + server-rendered HTML | Small and simple; no frontend build step |
-| Auth | Session cookies, Argon2 password hashes | Standard and safe |
 
 ### Indexing
 
@@ -287,15 +287,7 @@ It takes roughly 1–3 seconds per page. Ctrl+C stops at any point: finished boo
 - [x] Previous/next match navigation within a book
 - [x] "Can't search" page, with OCR buttons and live progress
 
-### Phase 3: Network mode
-- [ ] `--mode network` with user accounts and login
-- [ ] Reader/admin roles; re-index from the web UI
-- [ ] Optional per-user topic restrictions
-- [ ] Mobile-friendly layout
-- [ ] Docker image + compose example
-- [ ] Reverse proxy and VPN docs
-
-### Phase 4: Nice to have
+### Phase 3: Nice to have
 - [ ] Watch folders and re-index automatically (`watch = true` in `[index]`)
 - [ ] Book cover thumbnails
 - [ ] Search history and saved searches
@@ -307,7 +299,15 @@ It takes roughly 1–3 seconds per page. Ctrl+C stops at any point: finished boo
 - [ ] Screenshots in this README
 - [ ] Tests running on Windows, macOS and Linux (GitHub Actions)
 - [ ] `LICENSE` file (MIT)
-- [ ] Publish to PyPI and GitHub Container Registry
+- [ ] Publish to PyPI
+
+### Future enhancement, on request: network access
+Not scheduled. It will be built if there's a need for it; open an issue if you'd use it. See [Home server / network](#2-home-server--network-on-request) for the design.
+- [ ] `--mode network` with user accounts and login (session cookies, hashed passwords)
+- [ ] Reader/admin roles; OCR and re-index from the web UI for admins
+- [ ] Optional per-user topic restrictions
+- [ ] Docker image + compose example, published to GitHub Container Registry
+- [ ] Reverse proxy and VPN docs
 
 ---
 

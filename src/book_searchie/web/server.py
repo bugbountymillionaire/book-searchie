@@ -21,13 +21,13 @@ def serve(config: Config, *, port: int | None = None, open_browser: bool = True)
 
     if config.mode == "network":
         raise ConfigError(
-            "Network mode, with logins for other devices, arrives in Phase 3. "
-            'For now set mode = "local" in [server].'
+            "Network mode, for using Book-Searchie from other devices, isn't available. It's a possible "
+            'future enhancement (see the roadmap in the README). Set mode = "local" in [server].'
         )
     if config.host not in _LOOPBACK:
         raise ConfigError(
             f'Local mode only listens on this computer, but [server] host is "{config.host}". '
-            'Set host = "127.0.0.1". (Network mode, with logins, arrives in Phase 3.)'
+            'Set host = "127.0.0.1".'
         )
     if not config.index_path.exists():
         raise ConfigError(f"No index at {config.index_path}. Run 'book-searchie index' first.")
