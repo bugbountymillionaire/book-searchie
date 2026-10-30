@@ -22,7 +22,7 @@
 Point Book-Searchie at one or more library folders. Each top-level subfolder becomes a topic:
 
 ```
-E:\Knowledge\              <- library root (set in config)
+D:\Books\                  <- library root (set in config)
 ├── Herbalism\             <- topic: "Herbalism"
 │   ├── Culpeper - Complete Herbal.pdf
 │   └── Modern Herbal Medicine.epub
@@ -91,7 +91,7 @@ The config file is `book-searchie.toml` (`book-searchie init` creates it). Relat
 
 ```toml
 [library]
-roots = ["E:/Knowledge"]          # one or more library folders
+roots = ["D:/Books"]              # one or more library folders
 extensions = ["pdf", "epub"]
 exclude = []                      # extra folders or glob patterns to skip, e.g. ["Archive", "**/drafts"]
                                   # (folders starting with "_" are always skipped)
@@ -162,7 +162,7 @@ This is the easiest option for a NAS or home server:
 # docker-compose.yml
 services:
   book-searchie:
-    image: ghcr.io/<your-github-user>/book-searchie:latest
+    image: ghcr.io/bugbountymillionaire/book-searchie:latest
     ports:
       - "8004:8004"
     volumes:
@@ -298,7 +298,7 @@ It takes roughly 1–3 seconds per page. Ctrl+C stops at any point: finished boo
 - [ ] Demo library of public-domain books (e.g. from Project Gutenberg) for trying it out and for tests
 - [ ] Screenshots in this README
 - [ ] Tests running on Windows, macOS and Linux (GitHub Actions)
-- [ ] `LICENSE` file (MIT)
+- [x] `LICENSE` file (MIT)
 - [ ] Publish to PyPI
 
 ### Future enhancement, on request: network access
@@ -316,7 +316,7 @@ Not scheduled. It will be built if there's a need for it; open an issue if you'd
 Keep this repo **outside your book library**, not in a subfolder of a library root. That way the indexer won't pick up the source code, and you can't accidentally commit copyrighted books.
 
 ```bash
-git clone https://github.com/<your-github-user>/book-searchie.git
+git clone https://github.com/bugbountymillionaire/book-searchie.git
 cd book-searchie
 python -m venv .venv
 .venv\Scripts\activate          # Windows
@@ -331,4 +331,6 @@ The `.gitignore` should exclude `*.db`, `book-searchie.toml`, `.venv/` and any l
 
 ## License
 
-MIT (planned)
+MIT, see [LICENSE](LICENSE).
+
+Book-Searchie uses [PyMuPDF](https://pymupdf.readthedocs.io/), which is licensed under the AGPL (or commercially by Artifex). That doesn't affect using Book-Searchie or its own MIT-licensed source, but anyone distributing it bundled with PyMuPDF (for example as an `.exe` or container image) needs to meet the AGPL's terms for that bundle.
