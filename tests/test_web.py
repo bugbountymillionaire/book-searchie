@@ -71,6 +71,15 @@ def test_pdf_viewer_and_image(client, db):
     assert client.get(f"/page/{fid}/99.png").status_code == 404
 
 
+def test_viewer_bars_stay_on_screen(client, db):
+    # Everything above the page itself sits in the sticky header, for PDFs and EPUBs alike.
+    for name, seq in (("Culpeper", 1), ("Tricky", 0)):
+        res = client.get(f"/view/{_file_id(db, name)}/{seq}", params={"q": "nettle"})
+        head, body = res.text.split("<main", 1)
+        assert 'class="sticky-head"' in head and 'class="viewer-bar"' in head and 'class="viewer-tools"' in head
+        assert "viewer-bar" not in body and "viewer-tools" not in body
+
+
 def test_pdf_highlight_is_drawn(client, db):
     fid = _file_id(db, "Culpeper")
     plain = client.get(f"/page/{fid}/1.png").content

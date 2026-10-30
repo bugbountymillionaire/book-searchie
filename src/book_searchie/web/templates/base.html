@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Book-Searchie{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css?v={{ version }}">
+  <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23b4532a'/><text x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='Georgia,serif'>B</text></svg>">
 </head>
 <body class="{% block body_class %}{% endblock %}">
+  <div class="sticky-head">
   <header class="topbar">
     <a class="brand" href="/">Book-Searchie</a>
     <form class="searchform" action="/" method="get" role="search">
@@ -25,6 +26,8 @@
       <a href="/problems" class="{% if problem_count %}attention{% endif %}">Can't search{% if problem_count %} <span class="badge">{{ problem_count }}</span>{% endif %}</a>
     </nav>
   </header>
+  {% block sticky %}{% endblock %}
+  </div>
   <main class="{% block main_class %}page{% endblock %}">
     {% block content %}{% endblock %}
   </main>

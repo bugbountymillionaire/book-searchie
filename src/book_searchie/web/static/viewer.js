@@ -6,6 +6,28 @@
     if (link && link.href) window.location.href = link.href;
   };
 
+  // --- Compact header once scrolled ------------------------------------------
+  // Different thresholds for on and off, so shrinking the header can't make it flicker.
+  function onScroll() {
+    const y = window.scrollY;
+    if (y > 60) document.body.classList.add("scrolled");
+    else if (y < 10) document.body.classList.remove("scrolled");
+  }
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  // Scroll so an element sits in the middle of the space below the fixed header.
+  function reveal(el, behavior) {
+    const head = document.querySelector(".sticky-head");
+    const top = () => window.scrollY + el.getBoundingClientRect().top;
+    // Compact the header first if we'll end up scrolled, so we measure its final height.
+    if (top() > 60) document.body.classList.add("scrolled");
+    const headH = head.getBoundingClientRect().height;
+    const space = window.innerHeight - headH;
+    const y = top() - headH - Math.max(0, (space - el.getBoundingClientRect().height) / 2);
+    window.scrollTo({ top: Math.max(0, y), behavior });
+  }
+
   // --- PDF zoom (pinch-zoom also works on phones and touchpads) -------------
   const img = $("pdf-page");
   const zoomLevels = [50, 75, 100, 125, 150, 200, 300];
@@ -40,21 +62,21 @@
   const chapter = $("chapter");
   const marks = chapter ? Array.from(chapter.querySelectorAll("mark")) : [];
   let current = -1;
-  function showMark(i) {
+  function showMark(i, instant) {
     if (!marks.length) return;
     if (i >= marks.length) return go("next-match"); // past the last highlight: next chapter with a match
     if (i < 0) return go("prev-match");
     marks.forEach((m) => m.classList.remove("current"));
     current = i;
     marks[i].classList.add("current");
-    marks[i].scrollIntoView({ block: "center", behavior: "smooth" });
+    reveal(marks[i], instant ? "auto" : "smooth");
     $("mark-label").textContent = `Highlight ${i + 1} of ${marks.length}`;
   }
   if (marks.length) {
     $("next-mark").addEventListener("click", () => showMark(current + 1));
     $("prev-mark").addEventListener("click", () => showMark(current - 1));
     // Arriving from "previous match" lands on the chapter's last highlight.
-    window.addEventListener("load", () => showMark(location.hash === "#last" ? marks.length - 1 : 0));
+    window.addEventListener("load", () => showMark(location.hash === "#last" ? marks.length - 1 : 0, true));
   }
 
   // --- Keyboard ---------------------------------------------------------------

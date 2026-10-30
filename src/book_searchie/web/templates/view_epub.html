@@ -2,7 +2,7 @@
 {% block title %}{{ book.title }}, {{ label }} · Book-Searchie{% endblock %}
 {% block body_class %}viewer{% endblock %}
 {% block main_class %}viewer-main{% endblock %}
-{% block content %}
+{% block sticky %}
 {% include "_viewer_bar.html" %}
 <div class="viewer-tools">
   <div class="group">
@@ -18,8 +18,10 @@
   </div>
   {% endif %}
 </div>
+{% endblock %}
+{% block content %}
 <article class="chapter" id="chapter" data-marks="{{ marks }}">
   {{ content }}
 </article>
 {% endblock %}
-{% block scripts %}<script src="/static/viewer.js?v={{ version }}"></script>{% endblock %}
+{% block scripts %}<script src="/static/viewer.js?v={{ static_version }}"></script>{% endblock %}

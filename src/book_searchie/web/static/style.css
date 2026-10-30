@@ -55,8 +55,9 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 2px; pad
 [hidden] { display: none !important; }
 
 /* --- Top bar -------------------------------------------------------------- */
+/* The search bar, plus the viewer's bars on book pages, stay on screen while scrolling. */
+.sticky-head { position: sticky; top: 0; z-index: 10; box-shadow: var(--shadow); }
 .topbar {
-  position: sticky; top: 0; z-index: 10;
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
   padding: 10px max(16px, env(safe-area-inset-left));
   background: var(--surface); border-bottom: 1px solid var(--line);
@@ -141,6 +142,11 @@ a.btn:hover { text-decoration: none; border-color: var(--accent); }
 .chapter img { max-width: 100%; height: auto; }
 .chapter table { border-collapse: collapse; display: block; overflow-x: auto; }
 .chapter td, .chapter th { border: 1px solid var(--line); padding: 4px 8px; }
+/* Once the page scrolls, shrink the book title to one line so more of the page shows. */
+.scrolled .viewer-bar { padding-top: 6px; padding-bottom: 6px; }
+.scrolled .viewer-title .meta { display: none; }
+.scrolled .viewer-title > div { min-width: 0; }
+.scrolled .viewer-title h1 { font-size: 0.98rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chapter mark.current { background: var(--mark-current); outline: 2px solid var(--mark-current); }
 
 /* --- Can't search page ----------------------------------------------------- */
@@ -170,5 +176,18 @@ a.btn:hover { text-decoration: none; border-color: var(--accent); }
   .searchform { flex-basis: 100%; }
   .searchform select { max-width: 8.5rem; }
   .viewer-title { flex-wrap: wrap; gap: 4px 12px; }
+  .scrolled .viewer-title { flex-wrap: nowrap; }
+  /* Keep the fixed header short on phones: brand and "Can't search" share a row,
+     and each bar of buttons fits on one line, shortening its label if needed. */
+  .topbar { padding: 6px 12px; gap: 6px 12px; }
+  .topnav { order: 1; margin-left: auto; }
+  .searchform { order: 2; }
+  .viewer-bar, .viewer-tools { padding: 5px 12px; gap: 5px 10px; }
+  .match-nav, .viewer-tools .group { flex: 1 1 100%; flex-wrap: nowrap; min-width: 0; }
+  .match-nav .position, .viewer-tools .position {
+    flex: 1 1 auto; min-width: 0; text-align: center; font-size: 0.82rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .btn { padding: 4px 9px; }
   h1 { font-size: 1.4rem; }
 }

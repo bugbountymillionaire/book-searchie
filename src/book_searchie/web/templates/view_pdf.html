@@ -2,7 +2,7 @@
 {% block title %}{{ book.title }}, page {{ label }} · Book-Searchie{% endblock %}
 {% block body_class %}viewer{% endblock %}
 {% block main_class %}viewer-main{% endblock %}
-{% block content %}
+{% block sticky %}
 {% include "_viewer_bar.html" %}
 <div class="viewer-tools">
   <div class="group">
@@ -16,8 +16,10 @@
     <button class="btn" type="button" data-zoom="1" title="Zoom in (+)">+</button>
   </div>
 </div>
+{% endblock %}
+{% block content %}
 <div class="page-frame" id="page-frame">
   <img class="pdf-page" id="pdf-page" src="{{ image_url }}" alt="Page {{ label }} of {{ book.title }}">
 </div>
 {% endblock %}
-{% block scripts %}<script src="/static/viewer.js?v={{ version }}"></script>{% endblock %}
+{% block scripts %}<script src="/static/viewer.js?v={{ static_version }}"></script>{% endblock %}

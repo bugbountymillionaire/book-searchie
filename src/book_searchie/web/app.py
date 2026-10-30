@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from urllib.parse import urlencode
@@ -47,6 +48,9 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.filters["marked"] = marked
     templates.env.globals["version"] = __version__
+    # Stylesheets and scripts are linked with a fingerprint of their contents, so a
+    # browser never keeps using an old copy after they change.
+    templates.env.globals["static_version"] = _static_fingerprint()
     job = OcrJob(config)
 
     def open_db() -> Database:
@@ -251,6 +255,13 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
         return job.status()
 
     return app
+
+
+def _static_fingerprint() -> str:
+    digest = hashlib.sha256()
+    for path in sorted((HERE / "static").iterdir()):
+        digest.update(path.name.encode() + path.read_bytes())
+    return digest.hexdigest()[:10]
 
 
 def _require_app_header(value: str | None) -> None:
