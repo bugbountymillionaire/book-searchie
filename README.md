@@ -133,7 +133,7 @@ book-searchie serve
 
 ### 2. Home server / network *(on request)*
 
-> **Not being built for now.** This is a design sketch for a possible future enhancement. It will be built if there's a need for it, so if you'd use it, open an issue saying so and how you'd run it (always-on PC, NAS, Docker…).
+> **Not being built for now.** This is a design sketch for a possible future enhancement. It will be built if there's a need for it, so if you'd use it, add a 👍 or a comment to [issue #1](https://github.com/bugbountymillionaire/book-searchie/issues/1) saying how you'd run it (always-on PC, NAS, Docker…).
 
 Run Book-Searchie on a home server, NAS or always-on PC, and use it from phones, tablets and laptops on your network.
 
@@ -302,7 +302,7 @@ It takes roughly 1–3 seconds per page. Ctrl+C stops at any point: finished boo
 - [ ] Publish to PyPI
 
 ### Future enhancement, on request: network access
-Not scheduled. It will be built if there's a need for it; open an issue if you'd use it. See [Home server / network](#2-home-server--network-on-request) for the design.
+Not scheduled. It will be built if there's a need for it; tracked in [issue #1](https://github.com/bugbountymillionaire/book-searchie/issues/1). See [Home server / network](#2-home-server--network-on-request) for the design.
 - [ ] `--mode network` with user accounts and login (session cookies, hashed passwords)
 - [ ] Reader/admin roles; OCR and re-index from the web UI for admins
 - [ ] Optional per-user topic restrictions
