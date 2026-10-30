@@ -134,7 +134,11 @@ a.btn:hover { text-decoration: none; border-color: var(--accent); }
 .btn.subtle { color: var(--dim); }
 .position { font-size: 0.9rem; padding: 0 4px; }
 .page-frame { overflow: auto; padding: 16px; text-align: center; }
-.pdf-page { max-width: 100%; height: auto; background: #fff; box-shadow: 0 2px 12px rgb(0 0 0 / 0.18); }
+/* Zoom sets the wrapper's width; the image and the match boxes over it scale with it. */
+.page-wrap { position: relative; display: inline-block; vertical-align: top; width: 100%; max-width: 100%; }
+.pdf-page { display: block; width: 100%; height: auto; background: #fff; box-shadow: 0 2px 12px rgb(0 0 0 / 0.18); }
+.hit-box span { position: absolute; border-radius: 2px; pointer-events: none; }
+.hit-box.current span { box-shadow: 0 0 0 3px var(--mark-current); background: rgb(255 140 0 / 0.18); }
 .chapter {
   max-width: 42rem; margin: 0 auto; padding: 28px 18px 80px;
   font: 1.12rem/1.7 var(--serif); overflow-wrap: break-word;
@@ -184,6 +188,9 @@ a.btn:hover { text-decoration: none; border-color: var(--accent); }
   .searchform { order: 2; }
   .viewer-bar, .viewer-tools { padding: 5px 12px; gap: 5px 10px; }
   .match-nav, .viewer-tools .group { flex: 1 1 100%; flex-wrap: nowrap; min-width: 0; }
+  .viewer-tools { flex-wrap: nowrap; }
+  .viewer-tools .group:first-child { flex: 1 1 auto; }
+  .viewer-tools .group + .group { flex: none; gap: 3px; }
   .match-nav .position, .viewer-tools .position {
     flex: 1 1 auto; min-width: 0; text-align: center; font-size: 0.82rem;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

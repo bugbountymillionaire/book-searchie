@@ -19,7 +19,16 @@
 {% endblock %}
 {% block content %}
 <div class="page-frame" id="page-frame">
-  <img class="pdf-page" id="pdf-page" src="{{ image_url }}" alt="Page {{ label }} of {{ book.title }}">
+  <div class="page-wrap" id="page-wrap">
+    {# width/height reserve the page's shape before the image loads, so matches can be scrolled to straight away. #}
+    <img class="pdf-page" src="{{ image_url }}" alt="Page {{ label }} of {{ book.title }}"
+         width="{{ (pdf.width * image_dpi / 72)|round|int }}" height="{{ (pdf.height * image_dpi / 72)|round|int }}">
+    {% for boxes in pdf.matches %}
+    <div class="hit-box">
+      {% for x0, y0, x1, y1 in boxes %}<span style="left:{{ '%.3f'|format(x0 * 100) }}%;top:{{ '%.3f'|format(y0 * 100) }}%;width:{{ '%.3f'|format((x1 - x0) * 100) }}%;height:{{ '%.3f'|format((y1 - y0) * 100) }}%"></span>{% endfor %}
+    </div>
+    {% endfor %}
+  </div>
 </div>
 {% endblock %}
 {% block scripts %}<script src="/static/viewer.js?v={{ static_version }}"></script>{% endblock %}

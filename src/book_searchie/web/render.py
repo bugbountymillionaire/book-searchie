@@ -7,6 +7,7 @@ import posixpath
 import re
 import threading
 import zipfile
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import quote
@@ -25,11 +26,28 @@ _WORD = re.compile(r"\w+")
 _HIGHLIGHT = (1.0, 0.85, 0.1)
 
 
-def pdf_page_count_and_label(path: Path, seq: int) -> tuple[int, str]:
+@dataclass
+class PdfPage:
+    page_count: int
+    label: str
+    width: float  # in points
+    height: float
+    # Each match is one or more boxes (one per line it spans), as fractions of the
+    # page size, so the viewer can place them over the image at any zoom.
+    matches: list[list[tuple[float, float, float, float]]]
+
+
+def pdf_page(path: Path, seq: int, terms: list[Term]) -> PdfPage:
+    """What the viewer needs to know about one page, including where the matches are."""
     with _pdf_lock, pymupdf.open(path) as doc:
         if not 0 <= seq < doc.page_count:
             raise IndexError(seq)
-        return doc.page_count, doc[seq].get_label() or str(seq + 1)
+        page = doc[seq]
+        w, h = page.rect.width, page.rect.height
+        matches = []
+        for boxes in _match_boxes(page, terms):
+            matches.append([(r.x0 / w, r.y0 / h, r.x1 / w, r.y1 / h) for r in boxes])
+        return PdfPage(doc.page_count, page.get_label() or str(seq + 1), w, h, matches)
 
 
 def render_pdf_page(path: Path, seq: int, terms: list[Term], *, dpi: int = 150) -> tuple[bytes, int]:
@@ -38,31 +56,46 @@ def render_pdf_page(path: Path, seq: int, terms: list[Term], *, dpi: int = 150) 
         if not 0 <= seq < doc.page_count:
             raise IndexError(seq)
         page = doc[seq]
-        count = 0
-        if terms:
-            # Each word is (x0, y0, x1, y1, text, block, line, word number).
-            words = page.get_text("words")
-            tokens, owners = [], []
-            i = 0
-            while i < len(words):
-                text, owner = words[i][4], (i,)
-                nxt = words[i + 1] if i + 1 < len(words) else None
-                # Rejoin a word hyphenated across lines ("co-" + "hosh"), as the indexer does.
-                if text.endswith("-") and nxt and nxt[5:7] != words[i][5:7] and nxt[4][:1].islower():
-                    text, owner = text[:-1] + nxt[4], (i, i + 1)
-                    i += 1
-                for m in _WORD.finditer(text):
-                    tokens.append(fold(m.group()))
-                    owners.append(owner)
-                i += 1
-            for start, end in find_spans(tokens, terms):
-                count += 1
-                for i in sorted({w for k in range(start, end) for w in owners[k]}):
-                    annot = page.add_highlight_annot(pymupdf.Rect(words[i][:4]))
-                    annot.set_colors(stroke=_HIGHLIGHT)
-                    annot.update()
+        matches = _match_boxes(page, terms)
+        for boxes in matches:
+            for rect in boxes:
+                annot = page.add_highlight_annot(rect)
+                annot.set_colors(stroke=_HIGHLIGHT)
+                annot.update()
         # The document is only changed in memory; nothing is saved.
-        return page.get_pixmap(dpi=dpi, annots=True).tobytes("png"), count
+        return page.get_pixmap(dpi=dpi, annots=True).tobytes("png"), len(matches)
+
+
+def _match_boxes(page, terms: list[Term]) -> list[list[pymupdf.Rect]]:
+    """Each match on the page, in reading order, as one box per line it covers."""
+    if not terms:
+        return []
+    # Each word is (x0, y0, x1, y1, text, block, line, word number).
+    # Same order the indexer reads the text in, which follows columns.
+    words = page.get_text("words")
+    tokens, owners = [], []
+    i = 0
+    while i < len(words):
+        text, owner = words[i][4], (i,)
+        nxt = words[i + 1] if i + 1 < len(words) else None
+        # Rejoin a word hyphenated across lines ("co-" + "hosh"), as the indexer does.
+        if text.endswith("-") and nxt and nxt[5:7] != words[i][5:7] and nxt[4][:1].islower():
+            text, owner = text[:-1] + nxt[4], (i, i + 1)
+            i += 1
+        for m in _WORD.finditer(text):
+            tokens.append(fold(m.group()))
+            owners.append(owner)
+        i += 1
+    matches = []
+    for start, end in find_spans(tokens, terms):
+        # Merge the match's words into one box per line, so a phrase reads as one highlight.
+        lines: dict[tuple, pymupdf.Rect] = {}
+        for w in sorted({w for k in range(start, end) for w in owners[k]}):
+            rect = pymupdf.Rect(words[w][:4])
+            key = words[w][5:7]
+            lines[key] = lines[key] | rect if key in lines else rect
+        matches.append(list(lines.values()))
+    return matches
 
 
 # --- EPUB --------------------------------------------------------------------

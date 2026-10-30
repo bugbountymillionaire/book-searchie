@@ -10,13 +10,6 @@
     <span class="position">{{ label }} <span class="dim">({{ chapter_number }} of {{ chapter_total }})</span></span>
     {% if next_chapter is not none %}<a class="btn" id="next-page" href="/view/{{ book.id }}/{{ next_chapter }}{{ qs }}" title="Next chapter (→)">Chapter ›</a>{% else %}<span class="btn disabled">Chapter ›</span>{% endif %}
   </div>
-  {% if marks %}
-  <div class="group">
-    <button class="btn" type="button" id="prev-mark" title="Previous highlight (shift+n)">↑</button>
-    <span class="position" id="mark-label">{{ marks }} highlight{{ 's' if marks != 1 }} here</span>
-    <button class="btn" type="button" id="next-mark" title="Next highlight (n)">↓</button>
-  </div>
-  {% endif %}
 </div>
 {% endblock %}
 {% block content %}

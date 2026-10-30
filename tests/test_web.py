@@ -6,6 +6,7 @@ from book_searchie import ocr
 from book_searchie.highlight import query_terms, text_spans
 from book_searchie.indexer import run_index
 from book_searchie.web.app import create_app
+from book_searchie.web import render
 from book_searchie.web.render import render_epub_chapter
 
 from .conftest import make_epub, make_pdf
@@ -65,7 +66,8 @@ def test_pdf_viewer_and_image(client, db):
     fid = _file_id(db, "Culpeper")
     res = client.get(f"/view/{fid}/1", params={"q": "cohosh OR echinacea"})
     assert res.status_code == 200
-    assert "Page with match 1 of 2" in res.text and f"/view/{fid}/2?q=" in res.text
+    assert "Page 1 of 2 with matches" in res.text and f"/view/{fid}/2?q=" in res.text
+    assert res.text.count('class="hit-box"') == 1  # cohosh is on this page; echinacea isn't
     img = client.get(f"/page/{fid}/1.png", params={"q": "cohosh"})
     assert img.status_code == 200 and img.headers["content-type"] == "image/png"
     assert client.get(f"/page/{fid}/99.png").status_code == 404
@@ -78,6 +80,18 @@ def test_viewer_bars_stay_on_screen(client, db):
         head, body = res.text.split("<main", 1)
         assert 'class="sticky-head"' in head and 'class="viewer-bar"' in head and 'class="viewer-tools"' in head
         assert "viewer-bar" not in body and "viewer-tools" not in body
+
+
+def test_pdf_match_boxes(tmp_path):
+    path = make_pdf(tmp_path / "boxes.pdf", ["Nettle tea, then more nettle.\nA phrase of black\ncohosh here."])
+    info = render.pdf_page(path, 0, query_terms('nettle OR "black cohosh"'))
+    # Three matches in reading order; the phrase spans two lines, so it has two boxes.
+    assert [len(m) for m in info.matches] == [1, 1, 2]
+    for boxes in info.matches:
+        for x0, y0, x1, y1 in boxes:
+            assert 0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1
+    assert info.matches[0][0][1] < info.matches[2][1][1]  # first match is above the phrase's second line
+    assert render.pdf_page(path, 0, []).matches == []
 
 
 def test_pdf_highlight_is_drawn(client, db):

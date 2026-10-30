@@ -27,6 +27,7 @@ from .jobs import OcrBusy, OcrJob
 HERE = Path(__file__).parent
 BOOKS_PER_PAGE = 10
 MAX_HITS = 1000
+PAGE_DPI = 150
 # Private-use characters mark matches in snippets, so they survive HTML escaping.
 MARK_OPEN, MARK_CLOSE = "", ""
 _HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -154,11 +155,12 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
             qs = "?" + urlencode({"q": q}) if q else ""
             if row["kind"] == "pdf":
                 try:
-                    page_count, label = render.pdf_page_count_and_label(path, seq)
+                    info = render.pdf_page(path, seq, query_terms(q))
                 except IndexError:
                     raise HTTPException(404, "That page doesn't exist in this book.") from None
                 return page(
-                    request, "view_pdf.html", db, q=q, book=row, seq=seq, label=label, page_count=page_count,
+                    request, "view_pdf.html", db, q=q, book=row, seq=seq, label=info.label,
+                    page_count=info.page_count, pdf=info, image_dpi=PAGE_DPI,
                     qs=qs, image_url=f"/page/{file_id}/{seq}.png{qs}", **nav,
                 )
             chapters = db.sections(file_id)
@@ -176,7 +178,7 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
             )
 
     @app.get("/page/{file_id}/{seq}.png")
-    def page_image(file_id: int, seq: int, q: str = "", dpi: int = 150):
+    def page_image(file_id: int, seq: int, q: str = "", dpi: int = PAGE_DPI):
         with open_db() as db:
             row = book_or_404(db, file_id)
             if row["kind"] != "pdf":
