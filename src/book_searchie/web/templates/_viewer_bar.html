@@ -13,15 +13,16 @@
   {% if q %}
   <div class="match-nav">
     {% set unit = 'page' if book.kind == 'pdf' else 'chapter' %}
-    {# The buttons step through the matches on this page first (viewer.js), then follow these links. #}
-    {% if prev_match is not none %}<a class="btn" id="prev-match" href="/view/{{ book.id }}/{{ prev_match }}{{ qs }}#last" title="Previous match (p)">‹ Match</a>{% else %}<span class="btn disabled" id="prev-match">‹ Match</span>{% endif %}
+    {# The buttons step through the matches on this page first (viewer.js), then follow these links.
+       "#last" lands on that page's last match; "wrap" means the link has gone round the end of the book. #}
+    {% if prev_match is not none %}<a class="btn" id="prev-match" href="/view/{{ book.id }}/{{ prev_match }}{{ qs }}#last{{ '-wrap' if prev_wraps }}" title="Previous match (p)">‹ Match</a>{% else %}<span class="btn disabled" id="prev-match">‹ Match</span>{% endif %}
     <span class="position" id="match-position"
           {% if match_number %}data-where="{{ unit }} {{ match_number }} of {{ match_total }} with matches"{% endif %}>
       {% if match_number %}{{ unit|capitalize }} {{ match_number }} of {{ match_total }} with matches
       {% elif match_total %}{{ match_total }} {{ unit }}{{ 's' if match_total != 1 }} with matches
       {% else %}No matches in this book{% endif %}
     </span>
-    {% if next_match is not none %}<a class="btn" id="next-match" href="/view/{{ book.id }}/{{ next_match }}{{ qs }}" title="Next match (n)">Match ›</a>{% else %}<span class="btn disabled" id="next-match">Match ›</span>{% endif %}
+    {% if next_match is not none %}<a class="btn" id="next-match" href="/view/{{ book.id }}/{{ next_match }}{{ qs }}{{ '#wrap' if next_wraps }}" title="Next match (n)">Match ›</a>{% else %}<span class="btn disabled" id="next-match">Match ›</span>{% endif %}
     <a class="btn subtle" href="/book/{{ book.id }}{{ qs }}">List</a>
   </div>
   {% endif %}

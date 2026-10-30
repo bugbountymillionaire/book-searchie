@@ -85,13 +85,42 @@
       where.textContent = ` · ${label.dataset.where}`;
       label.append(where);
     }
-    updateButtons();
   }
-  // Step within this page; past either end, go to the next/previous page with a match.
+
+  // A short note under the header, e.g. when the match buttons go round the end of the book.
+  let toastTimer;
+  function toast(text) {
+    let el = $("toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "toast";
+      el.className = "toast";
+      el.setAttribute("role", "status");
+      document.querySelector(".sticky-head").append(el);
+    }
+    el.textContent = text;
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
+  }
+  const WRAP_NOTE = { 1: "Back to the first match", "-1": "Round to the last match" };
+
+  // Step within this page; past either end, follow the link to the next/previous page
+  // with a match, which the server wraps round to the other end of the book.
   function step(dir) {
     const i = current + dir;
-    if (i >= 0 && i < matches.length) showMatch(i);
-    else go(dir > 0 ? "next-match" : "prev-match");
+    if (i >= 0 && i < matches.length) return showMatch(i);
+    const link = $(dir > 0 ? "next-match" : "prev-match");
+    if (!link || !link.href) return;
+    const dest = new URL(link.href);
+    if (dest.pathname + dest.search === location.pathname + location.search) {
+      // This is the book's only page with matches, so go round without reloading.
+      if (!matches.length) return;
+      showMatch(dir > 0 ? 0 : matches.length - 1);
+      toast(WRAP_NOTE[dir]);
+    } else {
+      window.location.href = link.href;
+    }
   }
   ["prev-match", "next-match"].forEach((id, k) => {
     const button = $(id);
@@ -101,17 +130,16 @@
       step(k ? 1 : -1);
     });
   });
-  // A button is live if it can move within this page or on to another page.
-  function updateButtons() {
-    const canMove = { "prev-match": current > 0, "next-match": current < matches.length - 1 };
-    for (const id in canMove) {
-      const button = $(id);
-      if (button) button.classList.toggle("disabled", !canMove[id] && !button.href);
-    }
-  }
+
+  // Arriving from "previous match" (#last) lands on the page's last match; "wrap"
+  // means we went round the end of the book to get here.
+  const arrival = location.hash;
+  if (arrival) history.replaceState(null, "", location.pathname + location.search);
   if (matches.length) {
-    // Arriving from "previous match" lands on the page's last match.
-    window.addEventListener("load", () => showMatch(location.hash === "#last" ? matches.length - 1 : 0, true));
+    window.addEventListener("load", () => {
+      showMatch(arrival.startsWith("#last") ? matches.length - 1 : 0, true);
+      if (arrival.endsWith("wrap")) toast(WRAP_NOTE[arrival.startsWith("#last") ? -1 : 1]);
+    });
   }
 
   // --- Keyboard ---------------------------------------------------------------

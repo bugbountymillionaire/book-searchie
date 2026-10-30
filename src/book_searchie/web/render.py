@@ -72,7 +72,8 @@ def _match_boxes(page, terms: list[Term]) -> list[list[pymupdf.Rect]]:
         return []
     # Each word is (x0, y0, x1, y1, text, block, line, word number).
     # Same order the indexer reads the text in, which follows columns.
-    words = page.get_text("words")
+    words = page.get_text("words", flags=pymupdf.TEXTFLAGS_WORDS)
+    lines = _line_metrics(page)
     tokens, owners = [], []
     i = 0
     while i < len(words):
@@ -89,13 +90,36 @@ def _match_boxes(page, terms: list[Term]) -> list[list[pymupdf.Rect]]:
     matches = []
     for start, end in find_spans(tokens, terms):
         # Merge the match's words into one box per line, so a phrase reads as one highlight.
-        lines: dict[tuple, pymupdf.Rect] = {}
+        boxes: dict[tuple, pymupdf.Rect] = {}
         for w in sorted({w for k in range(start, end) for w in owners[k]}):
-            rect = pymupdf.Rect(words[w][:4])
             key = words[w][5:7]
-            lines[key] = lines[key] | rect if key in lines else rect
-        matches.append(list(lines.values()))
+            rect = _fit_to_text(pymupdf.Rect(words[w][:4]), lines.get(key))
+            boxes[key] = boxes[key] | rect if key in boxes else rect
+        matches.append(list(boxes.values()))
     return matches
+
+
+def _line_metrics(page) -> dict[tuple[int, int], tuple[float, float, float, float]]:
+    """(baseline, font size, ascender, descender) for each (block, line) of words."""
+    metrics = {}
+    # The same flags as the word list, so block and line numbers line up.
+    for b, block in enumerate(page.get_text("dict", flags=pymupdf.TEXTFLAGS_WORDS)["blocks"]):
+        for n, line in enumerate(block.get("lines", ())):
+            if tuple(line["dir"]) == (1.0, 0.0) and line["spans"]:  # horizontal text only
+                span = max(line["spans"], key=lambda s: s["size"])
+                metrics[b, n] = (span["origin"][1], span["size"], span["ascender"], span["descender"])
+    return metrics
+
+
+def _fit_to_text(rect: pymupdf.Rect, metrics) -> pymupdf.Rect:
+    # Some fonts (Cambria, notably) report boxes several lines tall, which would paint
+    # big blobs over neighbouring lines. Rebuild those from the baseline and font size.
+    if metrics is None:
+        return rect
+    baseline, size, ascender, descender = metrics
+    if size > 0 and rect.height > 1.5 * size:
+        return pymupdf.Rect(rect.x0, baseline - ascender * size, rect.x1, baseline - descender * size)
+    return rect
 
 
 # --- EPUB --------------------------------------------------------------------

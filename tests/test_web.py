@@ -82,6 +82,20 @@ def test_viewer_bars_stay_on_screen(client, db):
         assert "viewer-bar" not in body and "viewer-tools" not in body
 
 
+def test_match_links_wrap_round(client, db):
+    fid = _file_id(db, "Culpeper")  # matches on pages 1 and 2 (seq)
+    q = {"q": "cohosh OR echinacea"}
+    first = client.get(f"/view/{fid}/1", params=q).text
+    assert f'href="/view/{fid}/2?q=cohosh+OR+echinacea"' in first  # next: on to page 2
+    assert f'href="/view/{fid}/2?q=cohosh+OR+echinacea#last-wrap"' in first  # previous: round to the end
+    last = client.get(f"/view/{fid}/2", params=q).text
+    assert f'href="/view/{fid}/1?q=cohosh+OR+echinacea#wrap"' in last  # next: round to the start
+    assert f'href="/view/{fid}/1?q=cohosh+OR+echinacea#last"' in last
+    # With no matches in the book, there's nowhere to go.
+    none = client.get(f"/view/{fid}/1", params={"q": "dovetail"}).text
+    assert 'id="next-match"' in none and 'class="btn disabled" id="next-match"' in none
+
+
 def test_pdf_match_boxes(tmp_path):
     path = make_pdf(tmp_path / "boxes.pdf", ["Nettle tea, then more nettle.\nA phrase of black\ncohosh here."])
     info = render.pdf_page(path, 0, query_terms('nettle OR "black cohosh"'))
@@ -92,6 +106,16 @@ def test_pdf_match_boxes(tmp_path):
             assert 0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1
     assert info.matches[0][0][1] < info.matches[2][1][1]  # first match is above the phrase's second line
     assert render.pdf_page(path, 0, []).matches == []
+
+
+def test_oversized_word_boxes_are_fitted_to_the_text():
+    # baseline 302, 11.5pt font with ascender 0.8 and descender -0.2
+    metrics = (302.0, 11.5, 0.8, -0.2)
+    tall = render._fit_to_text(pymupdf.Rect(36, 266, 78, 330), metrics)
+    assert (tall.x0, tall.x1) == (36, 78) and tall.y0 == pytest.approx(292.8) and tall.y1 == pytest.approx(304.3)
+    normal = pymupdf.Rect(36, 292, 78, 305)
+    assert render._fit_to_text(normal, metrics) == normal
+    assert render._fit_to_text(normal, None) == normal
 
 
 def test_pdf_highlight_is_drawn(client, db):

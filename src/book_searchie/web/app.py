@@ -146,9 +146,14 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
                 matches = matching_seqs(db, q, file_id) if q.strip() else []
             except QueryError:
                 matches = []
+            prev_match = max((s for s in matches if s < seq), default=None)
+            next_match = min((s for s in matches if s > seq), default=None)
             nav = {
-                "prev_match": max((s for s in matches if s < seq), default=None),
-                "next_match": min((s for s in matches if s > seq), default=None),
+                # Past either end, the match buttons wrap round to the other end of the book.
+                "prev_match": matches[-1] if prev_match is None and matches else prev_match,
+                "next_match": matches[0] if next_match is None and matches else next_match,
+                "prev_wraps": prev_match is None,
+                "next_wraps": next_match is None,
                 "match_number": matches.index(seq) + 1 if seq in matches else None,
                 "match_total": len(matches),
             }
