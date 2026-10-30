@@ -315,7 +315,7 @@ It takes roughly 1–3 seconds per page. Ctrl+C stops at any point: finished boo
 - [ ] Windows `.exe` via PyInstaller
 
 ### Release checklist
-- [ ] Demo library of public-domain books (e.g. from Project Gutenberg) for trying it out and for tests
+- [x] Demo library of public-domain books from Project Gutenberg, for trying it out (`tools/demo_library.py`)
 - [x] Screenshots in this README
 - [ ] Tests running on Windows, macOS and Linux (GitHub Actions)
 - [x] `LICENSE` file (MIT)
@@ -346,6 +346,18 @@ pytest                          # run the tests
 ```
 
 The tests generate their own small PDFs and EPUBs, so they don't need a real library.
+
+To try Book-Searchie without your own books, or to update the screenshots above, there's a demo library of public-domain books from Project Gutenberg:
+
+```bash
+python tools/demo_library.py E:/BookSearchieDemo     # downloads 7 books (~35 MB) and indexes them
+cd E:/BookSearchieDemo && book-searchie serve        # http://localhost:8005
+
+pip install -e ".[screenshots]"                      # Playwright
+python tools/screenshots.py E:/BookSearchieDemo --browser msedge   # or chrome; writes docs/screenshots/
+```
+
+Build the demo outside your user folder: the "Can't search" screenshot shows the demo's path.
 
 The `.gitignore` should exclude `*.db`, `book-searchie.toml`, `.venv/` and any local library folders.
 

@@ -24,6 +24,9 @@ dev = [
     "pytest>=8",
     "httpx",  # for FastAPI's TestClient
 ]
+screenshots = [
+    "playwright>=1.40",  # tools/screenshots.py
+]
 
 [project.scripts]
 book-searchie = "book_searchie.cli:main"
