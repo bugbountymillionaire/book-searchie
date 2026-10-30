@@ -98,6 +98,7 @@ Indexing can be interrupted with Ctrl+C at any time. Books finished so far are k
 
 `book-searchie serve` opens the search page in your browser.
 
+- **Recent searches** are listed on the home page, newest first, with how many pages each found. Click one to run it again, remove one with its ×, or *Clear history* to remove them all. The latest 200 are kept, in the index file, and only on your computer.
 - **Results are grouped by book**, best matches first, with up to three highlighted snippets each and a link to all of a book's matches.
 - **Click a result** to open the page, scrolled to the first match. PDF pages appear as images with your terms highlighted; EPUB chapters appear as text.
 - **Step through matches** with the Match buttons. They go through each match on the page, then on to the next page with one, and wrap round from the last match in the book to the first. The navigation bars stay at the top of the screen as you scroll.

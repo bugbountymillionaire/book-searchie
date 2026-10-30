@@ -8,6 +8,27 @@
   <section class="welcome">
     <h1>Search {{ stats.books }} books</h1>
     <p>Type a word or phrase above. Results open at the page where they were found, with your search terms highlighted.</p>
+    {% if history %}
+    <section class="history" id="history">
+      <div class="history-head">
+        <h2>Recent searches</h2>
+        <button type="button" class="link-button" id="clear-history">Clear history</button>
+      </div>
+      <ul class="history-list">
+        {% for h in history %}
+        <li data-id="{{ h.id }}">
+          <a href="/?{{ {'q': h.query, 'topic': h.topic}|urlencode }}">{{ h.query }}</a>
+          {% if h.topic %}<span class="tag">{{ h.topic }}</span>{% endif %}
+          <span class="dim">
+            {% if h.hits == 0 %}no results{% else %}{{ h.hits }}{{ '+' if h.hits >= max_hits }} page{{ 's' if h.hits != 1 }}{% endif %}
+            · {{ h.searched_at|ago }}
+          </span>
+          <button type="button" class="remove" title="Remove from history" aria-label="Remove {{ h.query }} from history">×</button>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
     <table class="syntax">
       <tr><td><code>"black cohosh"</code></td><td>exact phrase</td></tr>
       <tr><td><code>comfrey poultice</code></td><td>pages with both words</td></tr>
@@ -62,3 +83,4 @@
   {% endif %}
 {% endif %}
 {% endblock %}
+{% block scripts %}{% if history %}<script src="/static/history.js?v={{ static_version }}"></script>{% endif %}{% endblock %}

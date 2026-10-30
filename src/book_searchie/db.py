@@ -65,6 +65,20 @@ END;
 
 _TABLES = ("sections_fts", "sections", "files")
 
+# Search history isn't a cache of the library, so it's kept when the index is rebuilt
+# (it isn't in _TABLES) or cleared. The same search with different capitals is one entry.
+_HISTORY = """
+CREATE TABLE IF NOT EXISTS searches (
+    id INTEGER PRIMARY KEY,
+    query TEXT NOT NULL COLLATE NOCASE,
+    topic TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+    hits INTEGER NOT NULL,
+    searched_at TEXT NOT NULL,
+    UNIQUE (query, topic)
+);
+"""
+HISTORY_LIMIT = 200
+
 
 class IndexUnavailable(Exception):
     """The index can't be used (missing FTS5, unreadable file, ...)."""
@@ -109,6 +123,7 @@ class Database:
         conn.execute("PRAGMA synchronous=NORMAL")
         db = cls(conn)
         db._migrate()
+        conn.executescript(_HISTORY)
         return db
 
     def close(self) -> None:
@@ -207,6 +222,37 @@ class Database:
         return self.conn.execute(
             "SELECT seq, label, href FROM sections WHERE file_id = ? ORDER BY seq", (file_id,)
         ).fetchall()
+
+    def record_search(self, query: str, topic: str, hits: int) -> None:
+        """Add a search to the history, or move it to the top if it's already there."""
+        # Microseconds, so searches made in the same second still come out in order.
+        now = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO searches (query, topic, hits, searched_at) VALUES (?, ?, ?, ?)"
+                " ON CONFLICT (query, topic) DO UPDATE SET"
+                " query = excluded.query, hits = excluded.hits, searched_at = excluded.searched_at",
+                (query, topic, hits, now),
+            )
+            self.conn.execute(
+                "DELETE FROM searches WHERE id NOT IN"
+                " (SELECT id FROM searches ORDER BY searched_at DESC, id DESC LIMIT ?)",
+                (HISTORY_LIMIT,),
+            )
+
+    def recent_searches(self, limit: int = 20) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT id, query, topic, hits, searched_at FROM searches ORDER BY searched_at DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    def delete_search(self, search_id: int) -> bool:
+        with self.conn:
+            return self.conn.execute("DELETE FROM searches WHERE id = ?", (search_id,)).rowcount > 0
+
+    def clear_searches(self) -> int:
+        with self.conn:
+            return self.conn.execute("DELETE FROM searches").rowcount
 
     def ocr_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM files WHERE ocr = 1").fetchone()[0]

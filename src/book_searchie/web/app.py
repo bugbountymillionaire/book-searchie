@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -38,6 +39,21 @@ def marked(snippet: str) -> Markup:
     return Markup(str(escape(snippet)).replace(MARK_OPEN, "<mark>").replace(MARK_CLOSE, "</mark>"))
 
 
+def ago(timestamp: str, now: datetime | None = None) -> str:
+    """'just now', '5 minutes ago', 'yesterday', '3 weeks ago'... for an ISO timestamp."""
+    seconds = ((now or datetime.now(timezone.utc)) - datetime.fromisoformat(timestamp)).total_seconds()
+    if seconds < 60:
+        return "just now"
+    for size, unit in ((31_536_000, "year"), (2_592_000, "month"), (604_800, "week"), (86_400, "day"),
+                       (3_600, "hour"), (60, "minute")):
+        if seconds >= size:
+            n = int(seconds // size)
+            if unit == "day" and n == 1:
+                return "yesterday"
+            return f"{n} {unit}{'s' if n != 1 else ''} ago"
+    return "just now"
+
+
 LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
 
 
@@ -49,6 +65,8 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.filters["marked"] = marked
+    templates.env.filters["ago"] = ago
+    templates.env.globals["max_hits"] = MAX_HITS
     templates.env.globals["version"] = __version__
     # Stylesheets and scripts are linked with a fingerprint of their contents, so a
     # browser never keeps using an old copy after they change.
@@ -109,11 +127,13 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
         q = q.strip()
         with open_db() as db:
             if not q:
-                return page(request, "search.html", db, topic=topic, stats=db.stats())
+                return page(request, "search.html", db, topic=topic, stats=db.stats(), history=db.recent_searches())
             try:
                 hits = search(db, q, topic=topic or None, limit=MAX_HITS, with_snippets=False)
             except QueryError as e:
                 return page(request, "search.html", db, q=q, topic=topic, error=str(e))
+            if page_no == 1:  # not again for each page of the same results
+                db.record_search(q, topic, len(hits))
             books: dict[int, dict] = {}
             for hit in hits:
                 books.setdefault(hit.file_id, {"hit": hit, "hits": []})["hits"].append(hit)
@@ -233,6 +253,22 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
         except opener.OpenFailed as e:
             raise HTTPException(500, str(e)) from None
         return {"opened": path.name}
+
+    # --- Search history ----------------------------------------------------
+
+    @app.delete("/api/history/{search_id}")
+    def forget_search(search_id: int, x_book_searchie: str | None = Header(default=None)):
+        _require_app_header(x_book_searchie)
+        with open_db() as db:
+            if not db.delete_search(search_id):
+                raise HTTPException(404, "That search isn't in the history.")
+        return {"deleted": search_id}
+
+    @app.delete("/api/history")
+    def clear_history(x_book_searchie: str | None = Header(default=None)):
+        _require_app_header(x_book_searchie)
+        with open_db() as db:
+            return {"deleted": db.clear_searches()}
 
     # --- Can't search / OCR ------------------------------------------------
 
