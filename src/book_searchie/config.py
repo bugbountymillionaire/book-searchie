@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 CONFIG_NAME = "book-searchie.toml"
 ENV_PREFIX = "BOOK_SEARCHIE_"
@@ -34,6 +36,10 @@ class Config:
     mode: str = "local"
     host: str = "127.0.0.1"
     port: int = 8004
+    # Optional tag suggestions from a local AI model (Ollama). Off unless switched on.
+    ai_enabled: bool = False
+    ai_endpoint: str = "http://localhost:11434"
+    ai_model: str = "llama3.2"
     source: Path | None = None  # the config file this was loaded from, if any
 
 
@@ -97,6 +103,7 @@ def _build(data: dict, base: Path, source: Path | None) -> Config:
     index = data.get("index", {})
     server = data.get("server", {})
     notes = data.get("notes", {})
+    ai = data.get("ai", {})
 
     roots = library.get("roots")
     if not roots:
@@ -130,6 +137,22 @@ def _build(data: dict, base: Path, source: Path | None) -> Config:
     if len(set(tag_kinds)) != len(tag_kinds):
         raise ConfigError("[notes] tag_kinds lists the same kind twice")
 
+    ai_enabled = ai.get("enabled", False)
+    if not isinstance(ai_enabled, bool):
+        raise ConfigError("[ai] enabled must be true or false")
+    ai_endpoint = str(ai.get("endpoint", "http://localhost:11434")).rstrip("/")
+    ai_model = str(ai.get("model", "llama3.2")).strip()
+    parts = urlsplit(ai_endpoint)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ConfigError(f"[ai] endpoint must be a web address like http://localhost:11434, not {ai_endpoint!r}")
+    if ai.get("allow_remote", False) is not True and not _is_loopback(parts.hostname):
+        raise ConfigError(
+            f"[ai] endpoint {ai_endpoint} isn't on this computer, so your notes would be sent elsewhere. "
+            "Use a local endpoint, or set allow_remote = true in [ai] if you really mean it."
+        )
+    if ai_enabled and not ai_model:
+        raise ConfigError("[ai] model is empty; name an installed Ollama model, e.g. \"llama3.2\"")
+
     mode = server.get("mode", "local")
     if mode not in MODES:
         raise ConfigError(f"[server] mode must be one of {', '.join(MODES)}, not {mode!r}")
@@ -149,8 +172,20 @@ def _build(data: dict, base: Path, source: Path | None) -> Config:
         mode=mode,
         host=server.get("host", "0.0.0.0" if mode == "network" else "127.0.0.1"),
         port=port,
+        ai_enabled=ai_enabled,
+        ai_endpoint=ai_endpoint,
+        ai_model=ai_model,
         source=source,
     )
+
+
+def _is_loopback(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
 
 
 def _toml_string(value: str) -> str:
@@ -175,6 +210,11 @@ path = "book-searchie.db"         # SQLite index file, relative to this config f
 [notes]
 path = "book-searchie-notes.db"   # your KB notes: your own work, so back this file up
 tag_kinds = ["subject", "use"]    # the kinds of tag you give notes, e.g. ["plant", "condition"]
+
+[ai]
+enabled = false                   # tag suggestions from a local model; needs Ollama (ollama.com)
+endpoint = "http://localhost:11434"
+model = "llama3.2"                # any model you've installed with `ollama pull`
 
 [server]
 mode = "local"                    # only "local" for now

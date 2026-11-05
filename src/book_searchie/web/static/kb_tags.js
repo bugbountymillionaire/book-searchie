@@ -86,10 +86,84 @@ window.KbTagField = function (box, onChange) {
   return {
     kind,
     get: () => (add(false), names.map((name) => ({ kind, name }))),
+    add: (name) => {
+      if (!has(name)) {
+        names.push(name);
+        changed();
+        render();
+      }
+    },
     set: (tags) => {
       names = tags.filter((t) => t.kind === kind).map((t) => t.name);
       input.value = "";
       render();
     },
   };
+};
+
+// "Suggest tags": ask the local AI model (if switched on) for tags, shown as chips the
+// user clicks to add. Nothing is added without a click.
+//
+//   KbSuggest(button, area, fields, note)   // note() -> {title, quote, body}
+window.KbSuggest = function (button, area, fields, note) {
+  if (!button || !area) return;
+  const byKind = Object.fromEntries(fields.map((f) => [f.kind, f]));
+
+  function say(text, kind) {
+    const p = document.createElement("p");
+    p.className = "kb-suggest-note" + (kind ? " " + kind : "");
+    p.textContent = text;
+    area.replaceChildren(p);
+  }
+
+  button.addEventListener("click", async () => {
+    const tags = fields.flatMap((f) => f.get());
+    const body = { ...note(), tags };
+    if (!(body.title || "").trim() && !(body.quote || "").trim() && !(body.body || "").trim()) {
+      say("Write the note first, then ask for suggestions.");
+      return;
+    }
+    button.disabled = true;
+    say("Asking the local AI model… (this can take a while the first time)");
+    try {
+      const res = await fetch("/api/ai/suggest-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Book-Searchie": "1" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Something went wrong (${res.status}).`);
+      if (!data.suggestions.length) {
+        say("No suggestions for this note.");
+        return;
+      }
+      const intro = document.createElement("p");
+      intro.className = "kb-suggest-note";
+      intro.textContent = "Suggested tags: click to add.";
+      const chips = data.suggestions.map((s) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "kb-suggestion" + (s.existing ? "" : " new");
+        chip.textContent = `+ ${s.name}`;
+        chip.title = `${s.kind[0].toUpperCase() + s.kind.slice(1)}${s.existing ? "" : " (a new tag)"}`;
+        const label = document.createElement("span");
+        label.className = "dim";
+        label.textContent = ` ${s.kind}${s.existing ? "" : ", new"}`;
+        chip.append(label);
+        chip.addEventListener("click", () => {
+          if (byKind[s.kind]) byKind[s.kind].add(s.name);
+          chip.remove();
+        });
+        return chip;
+      });
+      const row = document.createElement("div");
+      row.className = "kb-suggestions";
+      row.append(...chips);
+      area.replaceChildren(intro, row);
+    } catch (err) {
+      say(err.message, "error");
+    } finally {
+      button.disabled = false;
+    }
+  });
 };

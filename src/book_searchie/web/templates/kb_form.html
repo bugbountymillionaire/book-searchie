@@ -66,6 +66,12 @@
     <datalist id="kb-list-{{ kind }}"></datalist>
   </div>
   {% endfor %}
+  {% if ai_enabled %}
+  <div class="kb-suggest">
+    <button type="button" class="small" id="kb-suggest">Suggest tags</button>
+    <div id="kb-suggest-area" aria-live="polite"></div>
+  </div>
+  {% endif %}
 
   <p class="kb-status" id="form-status" role="status"></p>
   <div class="kb-actions">

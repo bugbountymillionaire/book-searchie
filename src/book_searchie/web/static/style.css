@@ -323,6 +323,15 @@ a.note-tag:hover { text-decoration: none; outline: 1px solid var(--accent); }
 .kb-backup code { overflow-wrap: anywhere; }
 .backup-links { display: flex; flex-wrap: wrap; gap: 8px; }
 
+/* --- AI tag suggestions ------------------------------------------------------------- */
+.kb-suggest { margin: 8px 0 2px; }
+.kb-suggest-note { margin: 6px 0 4px; font-size: 0.85rem; color: var(--dim); }
+.kb-suggest-note.error { color: var(--fail); }
+.kb-suggestions { display: flex; flex-wrap: wrap; gap: 6px; }
+.kb-suggestion { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--accent); background: var(--surface); font-size: 0.85rem; }
+.kb-suggestion.new { border-style: dashed; }
+.kb-suggestion .dim { font-size: 0.75rem; }
+
 /* --- Can't search page ----------------------------------------------------- */
 .ocr-panel { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 14px 18px; margin: 18px 0 26px; box-shadow: var(--shadow); }
 .ocr-panel h2 { margin: 0 0 4px; }

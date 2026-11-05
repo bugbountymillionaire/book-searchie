@@ -91,6 +91,7 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
     can_open = config.mode == "local"
     templates.env.globals["can_open"] = can_open
     templates.env.globals["tag_kinds"] = config.tag_kinds
+    templates.env.globals["ai_enabled"] = config.ai_enabled
     job = OcrJob(config)
 
     def open_db() -> Database:

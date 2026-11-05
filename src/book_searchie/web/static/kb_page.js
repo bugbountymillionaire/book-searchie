@@ -41,6 +41,11 @@
   const noteId = form.dataset.noteId;
   let dirty = false;
   const tagFields = Array.from(form.querySelectorAll(".kb-tags")).map((box) => KbTagField(box, () => (dirty = true)));
+  KbSuggest(document.getElementById("kb-suggest"), document.getElementById("kb-suggest-area"), tagFields, () => ({
+    title: form.elements.title.value,
+    quote: form.elements.quote.value,
+    body: form.elements.body.value,
+  }));
   const initialTags = JSON.parse(form.dataset.tags || "[]");
   tagFields.forEach((f) => f.set(initialTags));
   form.addEventListener("input", () => (dirty = true));

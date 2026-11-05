@@ -97,6 +97,9 @@
   const tagFields = Array.from(panel.querySelectorAll(".kb-tags")).map((box) =>
     KbTagField(box, () => (dirty = true))
   );
+  KbSuggest($("kb-suggest"), $("kb-suggest-area"), tagFields, () => ({
+    title: title.value, quote: quote.value, body: body.value,
+  }));
 
   // --- Saving ------------------------------------------------------------------
   form.addEventListener("input", () => (dirty = true));

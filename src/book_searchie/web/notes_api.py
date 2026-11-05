@@ -15,6 +15,7 @@ from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from .. import ai
 from ..config import Config
 from ..db import Database
 from ..notes import Note, NoteInvalid, NotesError, NotesStore, Tag
@@ -65,6 +66,13 @@ def file_ids(db: Database, notes: list[Note]) -> dict[str, int]:
     marks = ",".join("?" * len(paths))
     rows = db.conn.execute(f"SELECT id, path FROM files WHERE path IN ({marks})", list(paths))
     return {r["path"]: r["id"] for r in rows}
+
+
+class SuggestIn(BaseModel):
+    title: str = ""
+    quote: str = ""
+    body: str = ""
+    tags: list[TagIn] = Field(default_factory=list)  # already on the note, so not suggested again
 
 
 class TagRenameIn(BaseModel):
@@ -223,6 +231,22 @@ def add_notes_routes(
             "kinds": config.tag_kinds,
             "tags": [{"kind": t.kind, "name": t.name, "notes": t.notes, "aliases": t.aliases} for t in found],
         }
+
+    @app.post("/api/ai/suggest-tags")
+    def suggest_tags(data: SuggestIn, x_book_searchie: str | None = Header(default=None)):
+        """Tags a local AI model suggests for a note being written. Only ever suggestions."""
+        require_app_header(x_book_searchie)
+        if not config.ai_enabled:
+            raise HTTPException(404, "AI tag suggestions are off. Turn them on with [ai] enabled = true in the config.")
+        with open_notes(create=False) as store:
+            try:
+                found = ai.suggest_tags(
+                    config, store, title=data.title, quote=data.quote, body=data.body,
+                    current=[(t.kind, t.name) for t in data.tags],
+                )
+            except ai.AiUnavailable as e:
+                raise HTTPException(503, str(e)) from None
+        return {"suggestions": [{"kind": s.kind, "name": s.name, "existing": s.existing} for s in found]}
 
     # --- Tidying tags ---------------------------------------------------------------
 
