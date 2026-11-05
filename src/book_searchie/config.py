@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,6 +11,8 @@ from pathlib import Path
 CONFIG_NAME = "book-searchie.toml"
 ENV_PREFIX = "BOOK_SEARCHIE_"
 MODES = ("local", "network")
+DEFAULT_TAG_KINDS = ["subject", "use"]
+_TAG_KIND = re.compile(r"[a-z][a-z0-9_-]*")
 
 
 class ConfigError(Exception):
@@ -25,6 +28,9 @@ class Config:
     # only this format is searched, unless it can't be, when the next one is used.
     prefer: str = "epub"
     index_path: Path = Path("book-searchie.db")
+    # Your notes (the KB). Unlike the index, this is your own work, so back it up.
+    notes_path: Path = Path("book-searchie-notes.db")
+    tag_kinds: list[str] = field(default_factory=lambda: list(DEFAULT_TAG_KINDS))
     mode: str = "local"
     host: str = "127.0.0.1"
     port: int = 8004
@@ -43,6 +49,7 @@ _ENV = {
     "EXCLUDE": ("library", "exclude", lambda v: _split_list(v, ",")),
     "PREFER": ("library", "prefer", str),
     "INDEX": ("index", "path", str),
+    "NOTES": ("notes", "path", str),
     "MODE": ("server", "mode", str),
     "HOST": ("server", "host", str),
     "PORT": ("server", "port", str),
@@ -89,6 +96,7 @@ def _build(data: dict, base: Path, source: Path | None) -> Config:
     library = data.get("library", {})
     index = data.get("index", {})
     server = data.get("server", {})
+    notes = data.get("notes", {})
 
     roots = library.get("roots")
     if not roots:
@@ -110,6 +118,18 @@ def _build(data: dict, base: Path, source: Path | None) -> Config:
     if prefer not in ("pdf", "epub"):
         raise ConfigError(f"[library] prefer must be \"pdf\" or \"epub\", not {prefer!r}")
 
+    tag_kinds = notes.get("tag_kinds", DEFAULT_TAG_KINDS)
+    if isinstance(tag_kinds, str):
+        tag_kinds = [tag_kinds]
+    tag_kinds = [str(k).strip().lower() for k in tag_kinds if str(k).strip()]
+    if not tag_kinds:
+        raise ConfigError("[notes] tag_kinds needs at least one kind of tag, e.g. [\"subject\"]")
+    bad = [k for k in tag_kinds if not _TAG_KIND.fullmatch(k)]
+    if bad:
+        raise ConfigError(f"[notes] tag kinds must be single words (letters, digits, - or _), not {bad[0]!r}")
+    if len(set(tag_kinds)) != len(tag_kinds):
+        raise ConfigError("[notes] tag_kinds lists the same kind twice")
+
     mode = server.get("mode", "local")
     if mode not in MODES:
         raise ConfigError(f"[server] mode must be one of {', '.join(MODES)}, not {mode!r}")
@@ -124,6 +144,8 @@ def _build(data: dict, base: Path, source: Path | None) -> Config:
         exclude=list(library.get("exclude", [])),
         prefer=prefer,
         index_path=(base / index.get("path", "book-searchie.db")).resolve(),
+        notes_path=(base / notes.get("path", "book-searchie-notes.db")).resolve(),
+        tag_kinds=tag_kinds,
         mode=mode,
         host=server.get("host", "0.0.0.0" if mode == "network" else "127.0.0.1"),
         port=port,
@@ -149,6 +171,10 @@ prefer = "epub"                   # same book as PDF and EPUB in one folder: sea
 
 [index]
 path = "book-searchie.db"         # SQLite index file, relative to this config file
+
+[notes]
+path = "book-searchie-notes.db"   # your KB notes: your own work, so back this file up
+tag_kinds = ["subject", "use"]    # the kinds of tag you give notes, e.g. ["plant", "condition"]
 
 [server]
 mode = "local"                    # only "local" for now

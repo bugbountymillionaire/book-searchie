@@ -14,6 +14,10 @@ book-searchie.toml
 *.db-shm
 *-ocr/
 
+# Your KB notes and the copies made before upgrading them (contain quotes and your own notes)
+*-notes.db*
+*.db.*.bak
+
 # Never commit books
 *.pdf
 *.epub
