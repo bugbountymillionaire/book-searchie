@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from ..config import Config
 from ..db import Database
 from ..notes import Note, NoteInvalid, NotesError, NotesStore, Tag
+from . import render
 
 
 class TagIn(BaseModel):
@@ -132,10 +133,17 @@ def add_notes_routes(
         if not any(path.is_relative_to(root) for root in config.roots):
             raise HTTPException(400, "That book isn't in the library.")
         section = next((s for s in db.sections(data.file_id) if s["seq"] == data.seq), None)
-        if section is None:
+        if section is not None:
+            note.label, note.href = section["label"], section["href"]
+        elif row["kind"] == "pdf" and path.is_file():
+            # Pages without text (pictures, blank scans) aren't in the index, but can still have notes.
+            try:
+                note.label = render.pdf_page(path, data.seq, []).label
+            except IndexError:
+                raise HTTPException(400, "That page isn't in this book.") from None
+        else:
             raise HTTPException(400, "That page isn't in the index for this book.")
         note.path, note.seq, note.topic, note.book_title = row["path"], data.seq, row["topic"], row["title"]
-        note.label, note.href = section["label"], section["href"]
         return note
 
     def save(store: NotesStore, db: Database, note: Note, note_id: int | None = None) -> dict:

@@ -10,6 +10,9 @@
     <span class="position">{{ label }} <span class="dim">({{ chapter_number }} of {{ chapter_total }})</span></span>
     {% if next_chapter is not none %}<a class="btn" id="next-page" href="/view/{{ book.id }}/{{ next_chapter }}{{ qs }}" title="Next chapter (→)"><span class="wide-only">Chapter </span>›</a>{% else %}<span class="btn disabled"><span class="wide-only">Chapter </span>›</span>{% endif %}
   </div>
+  <div class="group">
+    <button class="btn" type="button" id="kb-open" title="Save a quote or note from this chapter to your KB (s)"><span class="wide-only">Save to </span>KB +</button>
+  </div>
   {% if can_open %}
   <div class="group">
     <button class="btn" type="button" id="open-file" data-book="{{ book.id }}" title="Open the original file in your usual app for it (o)">Open<span class="wide-only"> file</span> ↗</button>
@@ -22,4 +25,5 @@
   {{ content }}
 </article>
 {% endblock %}
-{% block scripts %}<script src="/static/viewer.js?v={{ static_version }}"></script>{% endblock %}
+{% block scripts %}<script src="/static/viewer.js?v={{ static_version }}"></script>
+{% include "_kb_panel.html" %}{% endblock %}

@@ -1,0 +1,57 @@
+{# "Save to KB" side panel for the viewer. kb.js does the work. #}
+<aside class="kb-panel" id="kb-panel" hidden aria-labelledby="kb-heading"
+       data-file-id="{{ book.id }}" data-seq="{{ seq }}" data-kinds="{{ tag_kinds|tojson|forceescape }}">
+  <div class="kb-head">
+    <h2 id="kb-heading">Save to KB</h2>
+    <button type="button" class="kb-close" id="kb-close" title="Close (Esc)" aria-label="Close">×</button>
+  </div>
+  <p class="kb-source dim">From <strong>{{ book.title }}</strong>, {{ ('page ' ~ label) if book.kind == 'pdf' else label }}</p>
+
+  <section class="kb-existing" id="kb-existing" hidden>
+    <h3>Saved from this {{ 'page' if book.kind == 'pdf' else 'chapter' }} <span class="dim" id="kb-existing-count"></span></h3>
+    <ul id="kb-existing-list"></ul>
+  </section>
+
+  {% if book.kind == 'pdf' %}
+  <details class="kb-page-text" open>
+    <summary>Text on this page</summary>
+    {% if page_text %}
+    <p class="dim small">Select some of it, then press <em>Use selected text</em>.</p>
+    <div class="kb-text" id="kb-page-text" tabindex="0">{{ page_text }}</div>
+    {% else %}
+    <p class="dim small">This page has no text to quote from{{ ' yet: it may need OCR' if book.status == 'no_text' }}. You can still type a quote or a note.</p>
+    {% endif %}
+  </details>
+  {% else %}
+  <p class="dim small">Select text in the chapter, then press <em>Use selected text</em>.</p>
+  {% endif %}
+
+  <form id="kb-form" class="kb-form" autocomplete="off">
+    <label for="kb-quote">Quote</label>
+    <textarea id="kb-quote" name="quote" rows="4" placeholder="Words from the book"></textarea>
+    <button type="button" class="small" id="kb-use-selection">Use selected text</button>
+
+    <label for="kb-title">Title <span class="dim">(optional)</span></label>
+    <input id="kb-title" name="title" maxlength="200" placeholder="Leave blank to use the start of the quote">
+
+    {% for kind in tag_kinds %}
+    <label for="kb-tag-{{ kind }}">{{ kind|capitalize }}</label>
+    <div class="kb-tags" data-kind="{{ kind }}">
+      <span class="kb-chips"></span>
+      <input id="kb-tag-{{ kind }}" list="kb-list-{{ kind }}" maxlength="60" placeholder="Type, then Enter">
+      <datalist id="kb-list-{{ kind }}"></datalist>
+    </div>
+    {% endfor %}
+
+    <label for="kb-body">Your notes</label>
+    <textarea id="kb-body" name="body" rows="6"></textarea>
+    <p class="dim small">Formatting: **bold**, *italic*, lines starting "- " for a list, [text](https://…) for a link.</p>
+
+    <p class="kb-status" id="kb-status" role="status"></p>
+    <div class="kb-actions">
+      <button type="submit" class="primary" id="kb-save">Save to KB</button>
+      <button type="button" id="kb-cancel-edit" hidden>Cancel edit</button>
+    </div>
+  </form>
+</aside>
+<script src="/static/kb.js?v={{ static_version }}"></script>

@@ -10,10 +10,13 @@
     <span class="position">Page {{ label }} <span class="dim">({{ seq + 1 }} of {{ page_count }})</span></span>
     {% if seq + 1 < page_count %}<a class="btn" id="next-page" href="/view/{{ book.id }}/{{ seq + 1 }}{{ qs }}" title="Next page (→)"><span class="wide-only">Page </span>›</a>{% else %}<span class="btn disabled"><span class="wide-only">Page </span>›</span>{% endif %}
   </div>
-  <div class="group">
+  <div class="group zoom-group">
     <button class="btn" type="button" data-zoom="-1" title="Zoom out (-)">−</button>
     <button class="btn" type="button" data-zoom="0" title="Fit width (0)" id="zoom-label">100%</button>
     <button class="btn" type="button" data-zoom="1" title="Zoom in (+)">+</button>
+  </div>
+  <div class="group">
+    <button class="btn" type="button" id="kb-open" title="Save a quote or note from this page to your KB (s)"><span class="wide-only">Save to </span>KB +</button>
   </div>
   {% if can_open %}
   <div class="group">
@@ -36,4 +39,5 @@
   </div>
 </div>
 {% endblock %}
-{% block scripts %}<script src="/static/viewer.js?v={{ static_version }}"></script>{% endblock %}
+{% block scripts %}<script src="/static/viewer.js?v={{ static_version }}"></script>
+{% include "_kb_panel.html" %}{% endblock %}

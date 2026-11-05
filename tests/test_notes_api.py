@@ -123,7 +123,7 @@ def test_changes_need_the_app_header(client, db):
     "change, message",
     [
         ({"file_id": None}, "book and page"),
-        ({"seq": 99}, "page isn't in the index"),
+        ({"seq": 99}, "page isn't in this book"),
         ({"file_id": 999}, "isn't in the index"),
         ({"quote": ""}, "quote or some text"),
         ({"tags": [{"kind": "colour", "name": "green"}]}, "Unknown kind of tag"),
@@ -182,3 +182,38 @@ def test_missing_book_has_no_link(client, db, config, library):
     run_index(config, db)
     got = client.get(f"/api/notes/{note['id']}").json()
     assert got["source_missing"] is True and got["view_url"] is None and got["book_title"] == "Culpeper"
+
+
+# --- "Save to KB" in the viewer (KB step 4) ---
+
+
+def test_pdf_viewer_has_the_panel_and_page_text(client, db, library, config):
+    from .conftest import make_pdf
+
+    make_pdf(library / "Herbalism" / "Html.pdf", ["Black cohosh <b>root</b> & more"])
+    run_index(config, db)
+    fid = file_id(db, "Html")
+    page = client.get(f"/view/{fid}/0", params={"q": "cohosh"}).text
+    assert 'id="kb-panel"' in page and 'id="kb-open"' in page and "/static/kb.js" in page
+    assert 'data-kinds="[&#34;plant&#34;, &#34;condition&#34;]"' in page
+    assert 'for="kb-tag-plant"' in page and 'for="kb-tag-condition"' in page
+    assert '<div class="kb-text" id="kb-page-text" tabindex="0">Black <mark>cohosh</mark> &lt;b&gt;root&lt;/b&gt; &amp; more</div>' in page
+
+
+def test_epub_viewer_has_the_panel_without_page_text(client, db):
+    page = client.get(f"/view/{file_id(db, 'Modern Herbal')}/0").text
+    assert 'id="kb-panel"' in page and 'id="kb-page-text"' not in page
+    assert "Select text in the chapter" in page
+
+
+def test_note_on_a_page_without_text(client, db, library, config):
+    from .conftest import make_pdf
+
+    make_pdf(library / "Herbalism" / "Plates.pdf", ["Plate one, nettle.", "", "Plate three."])
+    run_index(config, db)
+    fid = file_id(db, "Plates")
+    assert "This page has no text to quote from" in client.get(f"/view/{fid}/1").text
+    res = client.post("/api/notes", json=book(db, file_id=fid, seq=1, quote="", body="A drawing of nettle."), headers=H)
+    assert res.status_code == 201 and res.json()["label"] == "2"
+    res = client.post("/api/notes", json=book(db, file_id=fid, seq=7, body="x"), headers=H)
+    assert res.status_code == 400 and "isn't in this book" in res.json()["error"]

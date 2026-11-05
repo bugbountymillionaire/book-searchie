@@ -41,6 +41,16 @@ def marked(snippet: str) -> Markup:
     return Markup(str(escape(snippet)).replace(MARK_OPEN, "<mark>").replace(MARK_CLOSE, "</mark>"))
 
 
+def highlighted(text: str, terms) -> Markup:
+    """Plain text, HTML-escaped, with the search terms in <mark>s."""
+    parts, pos = [], 0
+    for start, end in text_spans(text, terms):
+        parts += [escape(text[pos:start]), Markup("<mark>"), escape(text[start:end]), Markup("</mark>")]
+        pos = end
+    parts.append(escape(text[pos:]))
+    return Markup("").join(parts)
+
+
 def ago(timestamp: str, now: datetime | None = None) -> str:
     """'just now', '5 minutes ago', 'yesterday', '3 weeks ago'... for an ISO timestamp."""
     seconds = ((now or datetime.now(timezone.utc)) - datetime.fromisoformat(timestamp)).total_seconds()
@@ -77,6 +87,7 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
     # computer you're using in local mode.
     can_open = config.mode == "local"
     templates.env.globals["can_open"] = can_open
+    templates.env.globals["tag_kinds"] = config.tag_kinds
     job = OcrJob(config)
 
     def open_db() -> Database:
@@ -203,9 +214,12 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
                     info = render.pdf_page(path, seq, query_terms(q))
                 except IndexError:
                     raise HTTPException(404, "That page doesn't exist in this book.") from None
+                text = db.section_text(file_id, seq)
                 return page(
                     request, "view_pdf.html", db, q=q, book=row, seq=seq, label=info.label,
                     page_count=info.page_count, pdf=info, image_dpi=PAGE_DPI,
+                    # For "Save to KB": a PDF page is an image, so its text is shown to select quotes from.
+                    page_text=highlighted(text, query_terms(q)) if text else None,
                     qs=qs, image_url=f"/page/{file_id}/{seq}.png{qs}", **nav,
                 )
             chapters = db.sections(file_id)

@@ -231,6 +231,11 @@ class Database:
             "SELECT seq, label, href FROM sections WHERE file_id = ? ORDER BY seq", (file_id,)
         ).fetchall()
 
+    def section_text(self, file_id: int, seq: int) -> str | None:
+        """The indexed text of one page or chapter, or None if it has none."""
+        row = self.conn.execute("SELECT text FROM sections WHERE file_id = ? AND seq = ?", (file_id, seq)).fetchone()
+        return row["text"] if row else None
+
     def record_search(self, query: str, topic: str, hits: int) -> None:
         """Add a search to the history, or move it to the top if it's already there."""
         # Microseconds, so searches made in the same second still come out in order.
