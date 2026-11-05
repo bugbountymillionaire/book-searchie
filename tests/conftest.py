@@ -83,7 +83,8 @@ def library(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def config(library: Path, tmp_path: Path) -> Config:
-    return Config(roots=[library], index_path=tmp_path / "index.db")
+    # notes_path is set so tests can never touch a real notes file in the working directory.
+    return Config(roots=[library], index_path=tmp_path / "index.db", notes_path=tmp_path / "notes.db")
 
 
 @pytest.fixture

@@ -325,6 +325,40 @@ class NotesStore:
             self._drop_unused_tags()
         return True
 
+    # --- keeping book notes attached to their books (called by the indexer) ---
+
+    def move_book(self, old_path: str, new_path: str, topic: str, book_title: str) -> int:
+        """A book was moved or renamed: its notes follow it. Returns how many notes moved."""
+        with self.conn:
+            # Not a change to the notes themselves, so `updated` stays as it was.
+            return self.conn.execute(
+                "UPDATE notes SET path = ?, topic = ?, book_title = ?, source_missing = 0"
+                " WHERE source_type = 'book' AND path = ?",
+                (new_path, topic, book_title, old_path),
+            ).rowcount
+
+    def sync_books(self, present: set[str], unavailable_roots: list[str] = ()) -> int:
+        """Mark book notes whose book isn't in the library as "source missing", and unmark
+        those whose book is back. Notes under an unavailable root (an unplugged drive) are
+        left as they are. Returns how many notes are now missing their book."""
+        roots = [Path(r) for r in unavailable_roots]
+        paths = [r[0] for r in self.conn.execute("SELECT DISTINCT path FROM notes WHERE source_type = 'book'")]
+        with self.conn:
+            for path in paths:
+                if path in present:
+                    missing = 0
+                elif any(Path(path).is_relative_to(root) for root in roots):
+                    continue
+                else:
+                    missing = 1
+                self.conn.execute(
+                    "UPDATE notes SET source_missing = ? WHERE source_type = 'book' AND path = ?", (missing, path)
+                )
+        return self.missing_count()
+
+    def missing_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM notes WHERE source_missing = 1").fetchone()[0]
+
     def _set_tags(self, note_id: int, tags: list[Tag]) -> None:
         for tag in tags:
             # A tag keeps the spelling it was first given; "Nettle" and "nettle" are one tag.

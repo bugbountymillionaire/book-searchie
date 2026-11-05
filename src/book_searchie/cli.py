@@ -127,6 +127,11 @@ def cmd_index(args) -> int:
         f"Done: {report.added} added, {report.updated} updated, {report.moved} moved, {report.removed} removed, "
         f"{report.unchanged} unchanged. Index has {stats['books']} books."
     )
+    if report.notes_missing:
+        print(
+            f"{report.notes_missing} KB note(s) are from books that are no longer in the library. "
+            "The notes are kept, marked \"source missing\"."
+        )
     if report.duplicates:
         print(
             f"{report.duplicates} book(s) are also in their folder in another format; only one copy of each "

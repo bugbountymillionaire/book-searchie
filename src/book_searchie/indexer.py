@@ -11,6 +11,7 @@ from pathlib import Path
 from .config import Config
 from .db import Database, FileState
 from .extract import DrmProtected, ExtractError, PasswordProtected, extract, extract_pdf
+from .notes import NotesStore
 from .ocr import file_hash, ocr_copy_path
 from .scan import LibraryFile, scan_library
 
@@ -23,6 +24,7 @@ class IndexReport:
     moved: int = 0  # moved or renamed, recognised without reading them again
     unchanged: int = 0
     duplicates: int = 0  # copies of a book in another format, not searched
+    notes_missing: int = 0  # KB notes whose book is no longer in the library
     missing_roots: list[str] = field(default_factory=list)
 
 
@@ -32,8 +34,30 @@ def run_index(
     *,
     full: bool = False,
     progress: Callable[[str], None] = lambda msg: None,
+    notes: NotesStore | None = None,
+) -> IndexReport:
+    """Bring the index up to date with the library.
+
+    KB notes saved from books follow those books when they're moved or renamed, and
+    are marked "source missing" if they're deleted. Without `notes`, the notes file in
+    the config is used if there is one (indexing never creates it).
+    """
+    if notes is None and config.notes_path.is_file():
+        with NotesStore.open(config.notes_path) as store:
+            return _run_index(config, db, full, progress, store)
+    return _run_index(config, db, full, progress, notes)
+
+
+def _run_index(
+    config: Config,
+    db: Database,
+    full: bool,
+    progress: Callable[[str], None],
+    notes: NotesStore | None,
 ) -> IndexReport:
     report = IndexReport()
+    # Read before a full rebuild clears them, so notes can still follow moved books.
+    before = db.file_states()
     if full:
         db.clear()
 
@@ -47,22 +71,27 @@ def run_index(
         # Every root is unreachable (unplugged drive, unmounted share). Don't wipe the index.
         return report
 
-    known = db.file_states()
+    known = {} if full else dict(before)
     found = {str(f.path): f for f in scan_library(roots, config.extensions, config.exclude)}
 
     # Files under a missing root are kept, in case the drive comes back.
-    gone = {p: s for p, s in known.items() if p not in found and s.root not in report.missing_roots}
-    arrived = [f for p, f in found.items() if p not in known]
+    gone = {p: s for p, s in before.items() if p not in found and s.root not in report.missing_roots}
+    arrived = [f for p, f in found.items() if p not in before]
     moved = set()
     for f, old_path in _match_moves(gone, arrived):
         state = gone.pop(old_path)
-        db.move_file(state.id, f)
-        known[str(f.path)] = known.pop(old_path)
-        moved.add(str(f.path))
+        # Notes first: if the run stops between the two, the move is simply found again next time.
+        if notes is not None:
+            notes.move_book(old_path, str(f.path), f.topic, f.path.stem)
+        if not full:  # a full rebuild reads every book again anyway
+            db.move_file(state.id, f)
+            known[str(f.path)] = known.pop(old_path)
+            moved.add(str(f.path))
     report.moved = len(moved)
-    for state in gone.values():
-        db.remove_file(state.id)
-        report.removed += 1
+    if not full:
+        for state in gone.values():
+            db.remove_file(state.id)
+            report.removed += 1
 
     def unchanged(f: LibraryFile) -> None:
         if str(f.path) not in moved:  # those are counted as moved
@@ -114,6 +143,9 @@ def run_index(
                 report.added += 1
             else:
                 report.updated += 1
+
+    if notes is not None:
+        report.notes_missing = notes.sync_books(set(found), report.missing_roots)
     return report
 
 
