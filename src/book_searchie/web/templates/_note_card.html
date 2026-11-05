@@ -1,14 +1,5 @@
 {# One KB note. `card` comes from kb_pages.note_view. #}
-{% macro note_card(card, link_title=True) %}
-{% set n = card.note %}
-<article class="note-card" id="note-{{ n.id }}">
-  <div class="note-head">
-    <h2>{% if link_title %}<a href="/kb/note/{{ n.id }}">{{ card.title }}</a>{% else %}{{ card.title }}{% endif %}</h2>
-    <div class="note-actions">
-      <a class="btn subtle" href="/kb/note/{{ n.id }}/edit">Edit</a>
-      <button type="button" class="btn subtle danger" data-delete-note="{{ n.id }}" data-title="{{ card.title }}">Delete</button>
-    </div>
-  </div>
+{% macro note_source(card) %}
   <p class="note-source">
     <span class="source-badge {{ card.source.type }}">{{ card.source.badge }}</span>
     {% if card.source.type == 'book' %}
@@ -20,12 +11,39 @@
       {% else %}{{ card.source.title }}{% endif %}
     {% endif %}
   </p>
+{% endmacro %}
+
+{% macro note_card(card, link_title=True) %}
+{% set n = card.note %}
+<article class="note-card" id="note-{{ n.id }}">
+  <div class="note-head">
+    <h2>{% if link_title %}<a href="/kb/note/{{ n.id }}">{{ card.title }}</a>{% else %}{{ card.title }}{% endif %}</h2>
+    <div class="note-actions">
+      <a class="btn subtle" href="/kb/note/{{ n.id }}/edit">Edit</a>
+      <button type="button" class="btn subtle danger" data-delete-note="{{ n.id }}" data-title="{{ card.title }}">Delete</button>
+    </div>
+  </div>
+  {{ note_source(card) }}
   {% if n.quote %}<blockquote class="note-quote">{{ n.quote }}</blockquote>{% endif %}
   {% if card.body %}<div class="note-body">{{ card.body }}</div>{% endif %}
   <div class="meta note-meta">
     <span class="tag">{{ n.topic }}</span>
     {% for t in card.tags %}<a class="tag note-tag" href="{{ t.url }}" title="{{ t.kind|capitalize }}">{{ t.name }}</a>{% endfor %}
     <span class="dim note-date" title="Saved {{ n.created }}{% if n.updated != n.created %}, last changed {{ n.updated }}{% endif %}">{{ n.updated|ago }}</span>
+  </div>
+</article>
+{% endmacro %}
+
+{# A note in search results: title, source, and the matching words. #}
+{% macro note_hit(card) %}
+{% set n = card.note %}
+<article class="note-hit">
+  <h3><a href="/kb/note/{{ n.id }}">{{ card.title }}</a></h3>
+  {{ note_source(card) }}
+  <p class="snippet">{{ card.snippet|marked }}</p>
+  <div class="meta">
+    <span class="tag">{{ n.topic }}</span>
+    {% for t in card.tags %}<a class="tag note-tag" href="{{ t.url }}" title="{{ t.kind|capitalize }}">{{ t.name }}</a>{% endfor %}
   </div>
 </article>
 {% endmacro %}

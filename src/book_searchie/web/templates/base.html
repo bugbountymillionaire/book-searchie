@@ -20,6 +20,12 @@
         <option value="{{ t.topic }}" {% if t.topic|lower == topic|lower %}selected{% endif %}>{{ t.topic }} ({{ t.books }})</option>
         {% endfor %}
       </select>
+      {# Unticked boxes send nothing; with neither, both are searched (see app.search_scope). #}
+      {% set sb = scope_books is not defined or scope_books %}{% set sk = scope_kb is not defined or scope_kb %}
+      <span class="scope" role="group" aria-label="Search in">
+        <label><input type="checkbox" name="books" value="1" {{ 'checked' if sb }}> Books</label>
+        <label><input type="checkbox" name="kb" value="1" {{ 'checked' if sk }}> KB</label>
+      </span>
       <button type="submit">Search</button>
     </form>
     <nav class="topnav">
@@ -32,6 +38,7 @@
   <main class="{% block main_class %}page{% endblock %}">
     {% block content %}{% endblock %}
   </main>
+  <script src="/static/scope.js?v={{ static_version }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

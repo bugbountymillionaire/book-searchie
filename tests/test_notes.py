@@ -312,3 +312,13 @@ def test_bad_tag_kinds(tmp_path, kinds):
     path.write_text(f'[library]\nroots = ["x"]\n[notes]\ntag_kinds = {kinds}\n', encoding="utf-8")
     with pytest.raises(ConfigError, match="tag_kinds|tag kinds"):
         load_config(path)
+
+
+def test_snippet_comes_from_the_quote_or_text(store):
+    store.create(own_note(title="Nettle", body="Spring greens, cooked like spinach."))
+    store.create(other_note(title="Soup", body="A good nettle soup."))
+    store.create(own_note(title="Bare", body="Nothing to see.", tags=[Tag("subject", "Nettle")]))
+    snippets = {h.note.title: h.snippet for h in store.search("nettle")}
+    assert snippets["Nettle"] == "Spring greens, cooked like spinach."  # not the title again
+    assert snippets["Soup"] == "A good [nettle] soup."
+    assert snippets["Bare"] == "Nothing to see."  # only the tag matched

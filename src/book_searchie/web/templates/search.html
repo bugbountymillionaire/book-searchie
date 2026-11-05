@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_note_card.html" import note_hit %}
 {% set autofocus = not q %}
 {% block title %}{% if q %}{{ q }} · {% endif %}Book-Searchie{% endblock %}
 {% block content %}
@@ -6,7 +7,7 @@
   <div class="notice error">{{ error }}</div>
 {% elif not q %}
   <section class="welcome">
-    <h1>Search {{ stats.books }} books</h1>
+    <h1>Search {{ stats.books }} books{% if note_count %} and {{ note_count }} note{{ 's' if note_count != 1 }}{% endif %}</h1>
     <p>Type a word or phrase above. Results open at the page where they were found, with your search terms highlighted.</p>
     {% if history %}
     <section class="history" id="history">
@@ -15,13 +16,14 @@
         <button type="button" class="link-button" id="clear-history">Clear history</button>
       </div>
       <ul class="history-list">
-        {% for h in history %}
+        {% for item in history %}
+        {% set h = item.row %}
         <li data-id="{{ h.id }}">
-          <a href="/?{{ {'q': h.query, 'topic': h.topic}|urlencode }}">{{ h.query }}</a>
+          <a href="{{ item.url }}">{{ h.query }}</a>
           {% if h.topic %}<span class="tag">{{ h.topic }}</span>{% endif %}
+          {% if h.scope != 'both' %}<span class="tag kind" title="Searched {{ 'your books only' if h.scope == 'books' else 'your KB notes only' }}">{{ 'Books' if h.scope == 'books' else 'KB' }}</span>{% endif %}
           <span class="dim">
-            {% if h.hits == 0 %}no results{% else %}{{ h.hits }}{{ '+' if h.hits >= max_hits }} page{{ 's' if h.hits != 1 }}{% endif %}
-            · {{ h.searched_at|ago }}
+            {{ item.found }} · {{ h.searched_at|ago }}
           </span>
           <button type="button" class="remove" title="Remove from history" aria-label="Remove {{ h.query }} from history">×</button>
         </li>
@@ -42,10 +44,35 @@
       {% endfor %}
     </div>
   </section>
-{% elif not books %}
-  <div class="notice">No results for <strong>{{ q }}</strong>{% if topic %} in {{ topic }}{% endif %}.
-    {% if topic %}<a href="/?{{ {'q': q}|urlencode }}">Search all topics</a>.{% endif %}</div>
+{% elif scope_kb and not scope_books %}
+  {# KB only #}
+  {% if notes %}
+  <p class="result-summary">{{ note_total }} matching note{{ 's' if note_total != 1 }} in your KB{% if topic %} in <strong>{{ topic }}</strong>{% endif %}</p>
+  <div class="note-hits">{% for card in notes %}{{ note_hit(card) }}{% endfor %}</div>
+  {% if pages > 1 %}
+  <nav class="pager">
+    {% if page_no > 1 %}<a href="{{ page_url(page_no - 1) }}">← Previous</a>{% endif %}
+    <span>Page {{ page_no }} of {{ pages }}</span>
+    {% if page_no < pages %}<a href="{{ page_url(page_no + 1) }}">Next →</a>{% endif %}
+  </nav>
+  {% endif %}
+  {% else %}
+  <div class="notice">No notes in your KB match <strong>{{ q }}</strong>{% if topic %} in {{ topic }}{% endif %}.
+    {% if topic %}<a href="{{ all_topics_url }}">Search all topics</a>.{% endif %}</div>
+  {% endif %}
 {% else %}
+  {% if notes %}
+  <section class="kb-results" aria-labelledby="kb-results-head">
+    <h2 id="kb-results-head">Your notes <span class="dim">({{ note_total }})</span></h2>
+    <div class="note-hits">{% for card in notes %}{{ note_hit(card) }}{% endfor %}</div>
+    {% if note_total > notes|length %}<a class="more" href="{{ all_notes_url }}">All {{ note_total }} matching notes →</a>{% endif %}
+  </section>
+  {% endif %}
+  {% if not books %}
+  <div class="notice">No results for <strong>{{ q }}</strong> in your books{% if topic %} in {{ topic }}{% endif %}.
+    {% if topic %}<a href="{{ all_topics_url }}">Search all topics</a>.{% endif %}</div>
+  {% else %}
+  {% if notes %}<h2 class="books-head">Books</h2>{% endif %}
   <p class="result-summary">
     {{ hit_count }}{% if capped %}+{% endif %} matching page{{ 's' if hit_count != 1 }} in {{ book_count }}{% if capped %}+{% endif %} book{{ 's' if book_count != 1 }}{% if topic %} in <strong>{{ topic }}</strong>{% endif %}
   </p>
@@ -80,6 +107,7 @@
     <span>Page {{ page_no }} of {{ pages }}</span>
     {% if page_no < pages %}<a href="{{ page_url(page_no + 1) }}">Next →</a>{% endif %}
   </nav>
+  {% endif %}
   {% endif %}
 {% endif %}
 {% endblock %}

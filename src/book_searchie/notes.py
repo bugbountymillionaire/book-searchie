@@ -230,6 +230,13 @@ _NOTE_COLUMNS = (
 )
 
 
+def _best_snippet(row: sqlite3.Row, mark_open: str) -> str:
+    for name in ("quote_snippet", "body_snippet"):
+        if mark_open in (row[name] or ""):
+            return row[name]
+    return row["quote_snippet"] or row["body_snippet"] or row["any_snippet"] or ""
+
+
 class NotesStore:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
@@ -458,23 +465,27 @@ class NotesStore:
         mark: tuple[str, str] = ("[", "]"),
     ) -> list[NoteHit]:
         """Best matches first. Uses the same query syntax as the book search."""
+        # Snippets come from the quote or the note text, as the title is shown anyway: the one
+        # with a match, or failing that (only the title, source or tags matched) the start of one.
         sql = f"""
-            SELECT n.*, snippet(notes_fts, -1, ?, ?, '…', 24) AS snippet,
+            SELECT n.*, snippet(notes_fts, 1, ?1, ?2, '…', 24) AS quote_snippet,
+                   snippet(notes_fts, 2, ?1, ?2, '…', 24) AS body_snippet,
+                   snippet(notes_fts, -1, ?1, ?2, '…', 24) AS any_snippet,
                    bm25(notes_fts, {_WEIGHTS}) AS score
             FROM notes_fts JOIN notes n ON n.id = notes_fts.rowid
-            WHERE notes_fts MATCH ?
+            WHERE notes_fts MATCH ?3
         """
         params: list = [mark[0], mark[1], prepare_query(query)]
         if topic:
-            sql += " AND n.topic = ? COLLATE NOCASE"
+            sql += " AND n.topic = ?4 COLLATE NOCASE"
             params.append(topic)
-        sql += " ORDER BY score LIMIT ? OFFSET ?"
+        sql += f" ORDER BY score LIMIT ?{len(params) + 1} OFFSET ?{len(params) + 2}"
         params += [limit, offset]
         try:
             rows = self.conn.execute(sql, params).fetchall()
         except sqlite3.OperationalError as e:
             raise QueryError(f"Can't understand that search ({e}). Check quotes, brackets and AND/OR/NOT.") from None
-        return [NoteHit(self._note(r), r["snippet"], r["score"]) for r in rows]
+        return [NoteHit(self._note(r), _best_snippet(r, mark[0]), r["score"]) for r in rows]
 
     def search_count(self, query: str, *, topic: str | None = None) -> int:
         sql = "SELECT COUNT(*) FROM notes_fts JOIN notes n ON n.id = notes_fts.rowid WHERE notes_fts MATCH ?"

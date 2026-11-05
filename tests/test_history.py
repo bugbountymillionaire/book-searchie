@@ -48,7 +48,7 @@ def test_home_page_lists_history(client):
     client.get("/", params={"q": "dovetail", "topic": "Woodwork"})
     home = client.get("/").text
     assert "Recent searches" in home and 'id="clear-history"' in home and "history.js" in home
-    assert 'href="/?q=dovetail&amp;topic=Woodwork"' in home and "1 page" in home
+    assert 'href="/?q=dovetail&amp;topic=Woodwork&amp;books=1&amp;kb=1"' in home and "1 page" in home
     assert "Recent searches" not in client.get("/", params={"q": "cohosh"}).text  # only on the home page
 
 

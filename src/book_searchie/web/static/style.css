@@ -286,6 +286,23 @@ a.note-tag:hover { text-decoration: none; outline: 1px solid var(--accent); }
 .source-choice input { width: auto; accent-color: var(--accent); }
 .note-form .kb-actions { margin-top: 6px; align-items: center; }
 
+/* --- Search scope and note results ---------------------------------------------- */
+.scope { display: flex; align-items: center; gap: 10px; white-space: nowrap; font-size: 0.9rem; color: var(--dim); }
+.scope label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.scope input { margin: 0; width: 1rem; height: 1rem; accent-color: var(--accent); }
+.kb-results { margin: 0 0 22px; padding: 12px 16px 14px; border: 1px solid var(--line); border-left: 4px solid var(--ok); border-radius: var(--radius); background: var(--surface-2); }
+.kb-results h2 { margin: 0 0 8px; font-size: 1.1rem; }
+.kb-results .more { margin-top: 2px; }
+.note-hits .note-hit { padding: 10px 0; border-top: 1px solid var(--line); }
+.note-hits .note-hit:first-child { border-top: 0; padding-top: 2px; }
+.kb-results .note-hit { border-color: var(--line); }
+.kb-results .tag { background: var(--surface); }
+.note-hit h3 { margin: 0 0 2px; font: 600 1.05rem/1.3 var(--serif); overflow-wrap: anywhere; }
+.note-hit h3 a { color: var(--text); }
+.note-hit .note-source { margin: 0 0 2px; }
+.note-hit .snippet { margin: 2px 0 6px; }
+.books-head { font-size: 1.1rem; margin: 0 0 10px; }
+
 /* --- Can't search page ----------------------------------------------------- */
 .ocr-panel { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 14px 18px; margin: 18px 0 26px; box-shadow: var(--shadow); }
 .ocr-panel h2 { margin: 0 0 4px; }
@@ -312,6 +329,10 @@ a.note-tag:hover { text-decoration: none; outline: 1px solid var(--accent); }
 @media (max-width: 640px) {
   .searchform { flex-basis: 100%; }
   .searchform select { max-width: 8.5rem; }
+  .searchform { flex-wrap: wrap; }
+  .scope { order: 5; flex-basis: 100%; padding: 0 2px; gap: 16px; }
+  /* In the viewer, keep the header short; hidden boxes still apply your last choice. */
+  body.viewer .scope { display: none; }
   .viewer-title { flex-wrap: wrap; gap: 4px 12px; }
   .scrolled .viewer-title { flex-wrap: nowrap; }
   /* Keep the fixed header short on phones: brand and "Can't search" share a row,

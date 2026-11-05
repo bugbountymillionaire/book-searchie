@@ -67,17 +67,20 @@ _TABLES = ("sections_fts", "sections", "files")
 
 # Search history isn't a cache of the library, so it's kept when the index is rebuilt
 # (it isn't in _TABLES) or cleared. The same search with different capitals is one entry.
-_HISTORY = """
-CREATE TABLE IF NOT EXISTS searches (
+# scope is what was searched: "books", "kb" (your notes) or "both".
+_HISTORY_COLUMNS = """
     id INTEGER PRIMARY KEY,
     query TEXT NOT NULL COLLATE NOCASE,
     topic TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
-    hits INTEGER NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'books',
+    hits INTEGER NOT NULL,              -- matching book pages
+    notes INTEGER,                      -- matching notes, if the KB was searched
     searched_at TEXT NOT NULL,
-    UNIQUE (query, topic)
-);
+    UNIQUE (query, topic, scope)
 """
+_HISTORY = f"CREATE TABLE IF NOT EXISTS searches ({_HISTORY_COLUMNS});"
 HISTORY_LIMIT = 200
+SCOPES = ("books", "kb", "both")
 
 
 class IndexUnavailable(Exception):
@@ -124,6 +127,7 @@ class Database:
         db = cls(conn)
         db._migrate()
         conn.executescript(_HISTORY)
+        db._migrate_history()
         return db
 
     def close(self) -> None:
@@ -144,6 +148,25 @@ class Database:
                 self.conn.execute(f"DROP TABLE IF EXISTS {table}")
             self.conn.executescript(_SCHEMA)
             self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def _migrate_history(self) -> None:
+        """Add the search scope to history from before the KB, keeping every entry.
+
+        SQLite can't change a table's unique key in place, so the table is copied into
+        the new shape in one transaction: if anything goes wrong, nothing changes.
+        """
+        columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(searches)")}
+        if "scope" in columns:
+            return
+        self.conn.executescript(f"""
+            BEGIN;
+            CREATE TABLE searches_new ({_HISTORY_COLUMNS});
+            INSERT INTO searches_new (id, query, topic, scope, hits, searched_at)
+                SELECT id, query, topic, 'books', hits, searched_at FROM searches;
+            DROP TABLE searches;
+            ALTER TABLE searches_new RENAME TO searches;
+            COMMIT;
+        """)
 
     def clear(self) -> None:
         with self.conn:
@@ -236,16 +259,18 @@ class Database:
         row = self.conn.execute("SELECT text FROM sections WHERE file_id = ? AND seq = ?", (file_id, seq)).fetchone()
         return row["text"] if row else None
 
-    def record_search(self, query: str, topic: str, hits: int) -> None:
+    def record_search(self, query: str, topic: str, hits: int, scope: str = "books", notes: int | None = None) -> None:
         """Add a search to the history, or move it to the top if it's already there."""
+        if scope not in SCOPES:
+            raise ValueError(f"unknown search scope {scope!r}")
         # Microseconds, so searches made in the same second still come out in order.
         now = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         with self.conn:
             self.conn.execute(
-                "INSERT INTO searches (query, topic, hits, searched_at) VALUES (?, ?, ?, ?)"
-                " ON CONFLICT (query, topic) DO UPDATE SET"
-                " query = excluded.query, hits = excluded.hits, searched_at = excluded.searched_at",
-                (query, topic, hits, now),
+                "INSERT INTO searches (query, topic, scope, hits, notes, searched_at) VALUES (?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT (query, topic, scope) DO UPDATE SET query = excluded.query, hits = excluded.hits,"
+                " notes = excluded.notes, searched_at = excluded.searched_at",
+                (query, topic, scope, hits, notes, now),
             )
             self.conn.execute(
                 "DELETE FROM searches WHERE id NOT IN"
@@ -255,7 +280,8 @@ class Database:
 
     def recent_searches(self, limit: int = 20) -> list[sqlite3.Row]:
         return self.conn.execute(
-            "SELECT id, query, topic, hits, searched_at FROM searches ORDER BY searched_at DESC, id DESC LIMIT ?",
+            "SELECT id, query, topic, scope, hits, notes, searched_at FROM searches"
+            " ORDER BY searched_at DESC, id DESC LIMIT ?",
             (limit,),
         ).fetchall()
 
