@@ -41,34 +41,40 @@ class NoteIn(BaseModel):
     source_url: str | None = None
 
 
+@contextmanager
+def open_notes_for(config: Config, *, create: bool = True):
+    """The notes store, or None if there isn't one yet and create is False."""
+    if not create and not config.notes_path.is_file():
+        yield None
+        return
+    try:
+        store = NotesStore.open(config.notes_path)
+    except NotesError as e:
+        raise HTTPException(503, str(e)) from None
+    try:
+        yield store
+    finally:
+        store.close()
+
+
+def file_ids(db: Database, notes: list[Note]) -> dict[str, int]:
+    """Index ids of the books that book notes came from, by path, to link to the viewer."""
+    paths = {n.path for n in notes if n.path and not n.source_missing}
+    if not paths:
+        return {}
+    marks = ",".join("?" * len(paths))
+    rows = db.conn.execute(f"SELECT id, path FROM files WHERE path IN ({marks})", list(paths))
+    return {r["path"]: r["id"] for r in rows}
+
+
 def add_notes_routes(
     app: FastAPI,
     config: Config,
     open_db: Callable[[], Database],
     require_app_header: Callable[[str | None], None],
 ) -> None:
-    @contextmanager
     def open_notes(*, create: bool = True):
-        """The notes store, or None if there isn't one yet and create is False."""
-        if not create and not config.notes_path.is_file():
-            yield None
-            return
-        try:
-            store = NotesStore.open(config.notes_path)
-        except NotesError as e:
-            raise HTTPException(503, str(e)) from None
-        try:
-            yield store
-        finally:
-            store.close()
-
-    def file_ids(db: Database, notes: list[Note]) -> dict[str, int]:
-        paths = {n.path for n in notes if n.path}
-        if not paths:
-            return {}
-        marks = ",".join("?" * len(paths))
-        rows = db.conn.execute(f"SELECT id, path FROM files WHERE path IN ({marks})", list(paths))
-        return {r["path"]: r["id"] for r in rows}
+        return open_notes_for(config, create=create)
 
     def note_json(note: Note, ids: dict[str, int]) -> dict:
         data = {

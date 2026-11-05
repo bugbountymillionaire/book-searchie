@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_note_card.html" import note_card %}
+{% block title %}KB · Book-Searchie{% endblock %}
+{% block content %}
+<div class="kb-top">
+  <div>
+    <h1>KB</h1>
+    <p class="lede">{% if total %}{{ total }} note{{ 's' if total != 1 }} in your knowledge base.{% else %}Your knowledge base is empty so far.{% endif %}</p>
+  </div>
+  <a class="button primary" href="/kb/new">New note</a>
+</div>
+
+{% if not total %}
+<div class="notice">
+  <p>Save a quote or notes while reading: open a book page and press <em>Save to KB</em> (or <kbd>s</kbd>).</p>
+  <p>For things that don't come from your books, such as a lecture, a website, a course, or what you know yourself, use <a href="/kb/new">New note</a>.</p>
+</div>
+{% else %}
+{% if missing %}
+<p class="notice">{{ missing }} note{{ 's are' if missing != 1 else ' is' }} from a book that's no longer in the library. They're kept, marked <span class="source-missing">source missing</span>, in case the book comes back.</p>
+{% endif %}
+
+<section class="kb-browse">
+  <h2>Browse by tag</h2>
+  {% for kind, kind_tags in tags.items() %}
+  <div class="kb-kind">
+    <h3>{{ kind|capitalize }}</h3>
+    {% if kind_tags %}
+    <div class="topic-list">
+      {% for t in kind_tags %}<a class="chip" href="{{ t.url }}">{{ t.name }}<span>{{ t.notes }}</span></a>{% endfor %}
+    </div>
+    {% else %}<p class="dim small">No {{ kind }} tags yet.</p>{% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<section>
+  <h2>Recent notes</h2>
+  {% for card in notes %}{{ note_card(card) }}{% endfor %}
+  {% if pages > 1 %}
+  <nav class="pager">
+    {% if page_no > 1 %}<a href="/kb?page_no={{ page_no - 1 }}">‹ Newer</a>{% endif %}
+    <span>Page {{ page_no }} of {{ pages }}</span>
+    {% if page_no < pages %}<a href="/kb?page_no={{ page_no + 1 }}">Older ›</a>{% endif %}
+  </nav>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="/static/kb_page.js?v={{ static_version }}"></script>{% endblock %}

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% set editing = note is not none %}
+{% set is_book = editing and note.source_type == 'book' %}
+{% block title %}{{ 'Edit note' if editing else 'New note' }} · KB · Book-Searchie{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="{{ '/kb/note/%d'|format(note.id) if editing else '/kb' }}">← {{ 'Back to the note' if editing else 'KB' }}</a></p>
+<h1>{{ 'Edit note' if editing else 'New note' }}</h1>
+
+<form id="note-form" class="kb-form note-form" autocomplete="off"
+      data-note-id="{{ note.id if editing else '' }}" data-tags="{{ tags|tojson|forceescape }}">
+  {% if is_book %}
+  <input type="hidden" name="source_type" value="book">
+  <p class="note-source">
+    <span class="source-badge book">Book</span>
+    {% if source.url %}<a href="{{ source.url }}">{{ source.title }}, {{ source.where }}</a>{% else %}{{ source.title }}, {{ source.where }}{% endif %}
+    {% if source.missing %}<span class="source-missing">source missing</span>{% endif %}
+  </p>
+  {% else %}
+  <fieldset class="source-choice">
+    <legend>Where is it from?</legend>
+    <label><input type="radio" name="source_type" value="other" {{ 'checked' if not editing or note.source_type == 'other' }}>
+      <span><strong>Another source</strong> <span class="dim">a lecture, video, website, course or person</span></span></label>
+    <label><input type="radio" name="source_type" value="own" {{ 'checked' if editing and note.source_type == 'own' }}>
+      <span><strong>My own knowledge</strong> <span class="dim">from your own experience or understanding</span></span></label>
+  </fieldset>
+  <div id="other-fields">
+    <label for="f-source-ref">Source</label>
+    <input id="f-source-ref" name="source_ref" maxlength="500" value="{{ note.source_ref or '' if editing }}"
+           placeholder="e.g. Spring foraging walk, May 2026">
+    <label for="f-source-url">Link <span class="dim">(optional)</span></label>
+    <input id="f-source-url" name="source_url" type="url" maxlength="500" value="{{ note.source_url or '' if editing }}"
+           placeholder="https://…">
+  </div>
+  {% endif %}
+
+  <label for="f-title">Title{% if is_book %} <span class="dim">(optional)</span>{% endif %}</label>
+  <input id="f-title" name="title" maxlength="200" value="{{ note.title if editing }}"
+         {% if is_book %}placeholder="Leave blank to use the start of the quote"{% else %}required{% endif %}>
+
+  {% if not is_book %}
+  <label for="f-topic">Topic</label>
+  <select id="f-topic" name="topic" required>
+    <option value="">Choose a topic…</option>
+    {% set ns = namespace(found=false) %}
+    {% for t in topics %}
+    {% set selected = editing and t.topic|lower == note.topic|lower %}
+    {% if selected %}{% set ns.found = true %}{% endif %}
+    <option value="{{ t.topic }}" {{ 'selected' if selected }}>{{ t.topic }}</option>
+    {% endfor %}
+    {% if editing and not ns.found %}<option value="{{ note.topic }}" selected>{{ note.topic }} (no longer in the library)</option>{% endif %}
+  </select>
+  {% endif %}
+
+  <label for="f-quote">Quote <span class="dim">(optional{{ '' if is_book else ', e.g. a line from a lecture' }})</span></label>
+  <textarea id="f-quote" name="quote" rows="3">{{ note.quote if editing }}</textarea>
+
+  <label for="f-body">Your notes</label>
+  <textarea id="f-body" name="body" rows="9">{{ note.body if editing }}</textarea>
+  <p class="dim small">Formatting: **bold**, *italic*, lines starting "- " or "1. " for a list, [text](https://…) for a link. A blank line starts a new paragraph.</p>
+
+  {% for kind in form_kinds %}
+  <label for="kb-tag-{{ kind }}">{{ kind|capitalize }}</label>
+  <div class="kb-tags" data-kind="{{ kind }}">
+    <span class="kb-chips"></span>
+    <input id="kb-tag-{{ kind }}" list="kb-list-{{ kind }}" maxlength="60" placeholder="Type, then Enter">
+    <datalist id="kb-list-{{ kind }}"></datalist>
+  </div>
+  {% endfor %}
+
+  <p class="kb-status" id="form-status" role="status"></p>
+  <div class="kb-actions">
+    <button type="submit" class="primary" id="form-save">{{ 'Save changes' if editing else 'Save to KB' }}</button>
+    <a class="button" href="{{ '/kb/note/%d'|format(note.id) if editing else '/kb' }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script src="/static/kb_tags.js?v={{ static_version }}"></script>
+<script src="/static/kb_page.js?v={{ static_version }}"></script>
+{% endblock %}

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% from "_note_card.html" import note_card %}
+{% block title %}{{ card.title }} · KB · Book-Searchie{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/kb">← KB</a></p>
+{{ note_card(card, link_title=False) }}
+{% endblock %}
+{% block scripts %}<script src="/static/kb_page.js?v={{ static_version }}"></script>{% endblock %}

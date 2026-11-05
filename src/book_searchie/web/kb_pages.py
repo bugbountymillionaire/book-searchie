@@ -1,0 +1,130 @@
+"""The KB pages: browse notes by tag, see recent notes, and write or edit a note."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from urllib.parse import quote
+
+from fastapi import FastAPI, HTTPException, Request
+
+from .. import markdown
+from ..config import Config
+from ..db import Database
+from ..notes import Note
+from .notes_api import file_ids, open_notes_for
+
+NOTES_PER_PAGE = 20
+BADGES = {"book": "Book", "other": "Other source", "own": "Own knowledge"}
+
+
+def tag_url(kind: str, name: str) -> str:
+    return f"/kb/tag/{quote(kind, safe='')}/{quote(name, safe='')}"
+
+
+def note_view(note: Note, ids: dict[str, int]) -> dict:
+    """A note, ready for the note card template."""
+    source: dict = {"badge": BADGES[note.source_type], "type": note.source_type}
+    if note.source_type == "book":
+        file_id = ids.get(note.path)
+        where = note.label or ""
+        if not note.href:  # a PDF page rather than an EPUB chapter
+            where = f"p. {where}"
+        source.update(
+            title=note.book_title or "Unknown book", where=where, missing=note.source_missing,
+            url=f"/view/{file_id}/{note.seq}" if file_id is not None and not note.source_missing else None,
+        )
+    elif note.source_type == "other":
+        source.update(title=note.source_ref, url=note.source_url)
+    return {
+        "note": note,
+        "title": note.display_title,
+        "body": markdown.render(note.body) if note.body else None,
+        "source": source,
+        "tags": [{"kind": t.kind, "name": t.name, "url": tag_url(t.kind, t.name)} for t in note.tags],
+    }
+
+
+def add_kb_pages(app: FastAPI, config: Config, open_db: Callable[[], Database], page: Callable) -> None:
+    def views(db: Database, notes: list[Note]) -> list[dict]:
+        ids = file_ids(db, notes)
+        return [note_view(n, ids) for n in notes]
+
+    def note_or_404(store, note_id: int) -> Note:
+        note = store.get(note_id) if store else None
+        if note is None:
+            raise HTTPException(404, "That note isn't in your KB. It may have been deleted.")
+        return note
+
+    @app.get("/kb")
+    def kb_home(request: Request, page_no: int = 1):
+        with open_db() as db, open_notes_for(config, create=False) as store:
+            total = store.count() if store else 0
+            pages = max(1, -(-total // NOTES_PER_PAGE))
+            page_no = min(max(1, page_no), pages)
+            recent = store.recent(NOTES_PER_PAGE, (page_no - 1) * NOTES_PER_PAGE) if store else []
+            # Every configured kind, then any kinds still on notes but no longer in the config.
+            tags = {kind: [] for kind in config.tag_kinds}
+            for t in store.tags(by_name=True) if store else []:
+                tags.setdefault(t.kind, []).append({"name": t.name, "notes": t.notes, "url": tag_url(t.kind, t.name)})
+            return page(
+                request, "kb.html", db, section="kb", total=total, notes=views(db, recent), tags=tags,
+                missing=store.missing_count() if store else 0, page_no=page_no, pages=pages,
+            )
+
+    @app.get("/kb/new")
+    def kb_new(request: Request):
+        with open_db() as db:
+            return page(request, "kb_form.html", db, section="kb", note=None, source=None, tags=[],
+                        form_kinds=config.tag_kinds)
+
+    @app.get("/kb/note/{note_id}")
+    def kb_note(request: Request, note_id: int):
+        with open_db() as db, open_notes_for(config, create=False) as store:
+            note = note_or_404(store, note_id)
+            return page(request, "kb_note.html", db, section="kb", card=views(db, [note])[0])
+
+    @app.get("/kb/note/{note_id}/edit")
+    def kb_edit(request: Request, note_id: int):
+        with open_db() as db, open_notes_for(config, create=False) as store:
+            note = note_or_404(store, note_id)
+            card = views(db, [note])[0]
+            # A field for every kind on the note, so tags of kinds since removed from the config aren't lost.
+            kinds = config.tag_kinds + sorted({t.kind for t in note.tags} - set(config.tag_kinds))
+            return page(
+                request, "kb_form.html", db, section="kb", note=note, source=card["source"],
+                tags=[{"kind": t.kind, "name": t.name} for t in note.tags], form_kinds=kinds,
+            )
+
+    @app.get("/kb/tag/{kind}/{name:path}")
+    def kb_tag(request: Request, kind: str, name: str, by: str = ""):
+        with open_db() as db, open_notes_for(config, create=False) as store:
+            notes = store.with_tag(kind, name) if store else []
+            if not notes:
+                raise HTTPException(404, f"No notes in your KB have the tag \"{name}\".")
+            kind = kind.lower()
+            # The tag's own spelling, whatever the address said.
+            wanted = " ".join(name.split()).casefold()
+            name = next((t.name for t in notes[0].tags if t.kind == kind and t.name.casefold() == wanted), name)
+            used = {t.kind for n in notes for t in n.tags}
+            other_kinds = [k for k in config.tag_kinds if k != kind] + sorted(used - set(config.tag_kinds) - {kind})
+            if by == "none":
+                by = ""
+            elif by not in other_kinds:
+                by = next((k for k in other_kinds if k in used), "")
+            cards = views(db, notes)
+            groups: dict[str, list[dict]] = {}
+            ungrouped = []
+            for card in cards:
+                names = [t.name for t in card["note"].tags if t.kind == by] if by else []
+                for group in names:
+                    groups.setdefault(group, []).append(card)
+                if not names:
+                    ungrouped.append(card)
+            grouped = [{"name": g, "url": tag_url(by, g), "cards": groups[g]} for g in sorted(groups, key=str.casefold)]
+            if ungrouped:
+                grouped.append({"name": f"No {by}" if by and grouped else "", "url": None, "cards": ungrouped})
+            return page(
+                request, "kb_tag.html", db, section="kb", kind=kind, tag_name=name, count=len(notes),
+                by=by, other_kinds=other_kinds, groups=grouped,
+                by_url=lambda k: f"{tag_url(kind, name)}?by={quote(k)}",
+            )

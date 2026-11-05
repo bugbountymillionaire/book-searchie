@@ -25,6 +25,7 @@ from ..problems import PROBLEMS, detail, group_problems
 from ..search import QueryError, fill_snippets, matching_seqs, search
 from . import opener, render
 from .jobs import OcrBusy, OcrJob
+from .kb_pages import add_kb_pages
 from .notes_api import add_notes_routes
 
 HERE = Path(__file__).parent
@@ -96,6 +97,7 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
     def page(request: Request, name: str, db: Database, **context) -> HTMLResponse:
         context.setdefault("q", "")
         context.setdefault("topic", "")
+        context.setdefault("section", "")
         context["topics"] = db.topics()
         context["problem_count"] = len(db.problem_files())
         return templates.TemplateResponse(request, name, context)
@@ -142,6 +144,7 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
         return JSONResponse({"error": "That request isn't right. " + "; ".join(problems)}, status_code=422)
 
     add_notes_routes(app, config, open_db, _require_app_header)
+    add_kb_pages(app, config, open_db, page)
 
     # --- Search ------------------------------------------------------------
 

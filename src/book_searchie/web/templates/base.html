@@ -23,6 +23,7 @@
       <button type="submit">Search</button>
     </form>
     <nav class="topnav">
+      <a href="/kb" class="{{ 'current' if section == 'kb' }}"{% if section == 'kb' %} aria-current="page"{% endif %}>KB</a>
       <a href="/problems" class="{% if problem_count %}attention{% endif %}">Can't search{% if problem_count %} <span class="badge">{{ problem_count }}</span>{% endif %}</a>
     </nav>
   </header>

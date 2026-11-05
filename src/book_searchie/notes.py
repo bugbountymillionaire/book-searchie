@@ -427,8 +427,10 @@ class NotesStore:
         )
         return [self._note(r) for r in rows]
 
-    def tags(self, kind: str | None = None, prefix: str = "", limit: int | None = None) -> list[TagCount]:
-        """Tags in use with their note counts, most used first. prefix is for autocomplete."""
+    def tags(
+        self, kind: str | None = None, prefix: str = "", limit: int | None = None, *, by_name: bool = False
+    ) -> list[TagCount]:
+        """Tags in use with their note counts, most used first (or A to Z). prefix is for autocomplete."""
         sql = (
             "SELECT t.kind, t.name, COUNT(nt.note_id) AS notes FROM tags t"
             " JOIN note_tags nt ON nt.tag_id = t.id WHERE 1"
@@ -440,7 +442,7 @@ class NotesStore:
         if prefix.strip():
             sql += " AND t.name LIKE ? ESCAPE '\\'"
             params.append(re.sub(r"([\\%_])", r"\\\1", _norm_tag(prefix)) + "%")
-        sql += " GROUP BY t.id ORDER BY notes DESC, t.name"
+        sql += " GROUP BY t.id ORDER BY " + ("t.name" if by_name else "notes DESC, t.name")
         if limit:
             sql += " LIMIT ?"
             params.append(limit)

@@ -232,6 +232,60 @@ a.btn:hover { text-decoration: none; border-color: var(--accent); }
 .kb-status.error { color: var(--fail); }
 .kb-actions { display: flex; gap: 8px; }
 
+/* --- KB pages --------------------------------------------------------------- */
+.topnav { display: flex; gap: 16px; }
+.topnav a.current { color: var(--text); font-weight: 600; }
+a.button {
+  display: inline-block; padding: 7px 14px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); white-space: nowrap;
+}
+a.button:hover { text-decoration: none; border-color: var(--accent); }
+a.button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+kbd { font: 0.85em ui-monospace, Consolas, monospace; padding: 1px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); }
+.kb-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.kb-top .lede { margin-top: 0; }
+.kb-browse { margin: 8px 0 26px; }
+.kb-kind h3 { font-size: 0.95rem; margin: 14px 0 6px; color: var(--dim); }
+.kb-kind .topic-list { margin-top: 0; }
+.kb-kind-label { font: 400 1rem var(--sans); }
+.kb-group-by { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 4px 0 18px; }
+.kb-group-by .chip { padding: 3px 11px; font-size: 0.9rem; }
+.chip.current { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.kb-group h2 { margin: 24px 0 10px; }
+.kb-group h2 .count { font: 600 0.85rem var(--sans); margin-left: 4px; }
+.note-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 18px; margin-bottom: 14px; }
+.note-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.note-head h2 { margin: 0 0 4px; font-size: 1.15rem; overflow-wrap: anywhere; }
+.note-head h2 a { color: var(--text); }
+.note-actions { display: flex; gap: 6px; flex: none; }
+.btn.danger { color: var(--fail); }
+.note-source { margin: 0 0 8px; font-size: 0.9rem; color: var(--dim); overflow-wrap: anywhere; }
+.source-badge {
+  display: inline-block; padding: 0 7px; margin-right: 4px; border-radius: 4px; font-size: 0.75rem;
+  font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; vertical-align: 1px;
+  border: 1px solid currentColor;
+}
+.source-badge.book { color: var(--accent); }
+.source-badge.other { color: var(--ok); }
+.source-badge.own { color: var(--warn); }
+.source-missing { margin-left: 6px; padding: 0 7px; border-radius: 4px; background: var(--fail); color: var(--surface); font-size: 0.8rem; }
+.note-quote { margin: 8px 0; padding: 2px 0 2px 14px; border-left: 3px solid var(--line); font: 1.05rem/1.6 var(--serif); white-space: pre-line; }
+.note-body { overflow-wrap: anywhere; }
+.note-body p { margin: 0.5em 0; }
+.note-body ul, .note-body ol { margin: 0.5em 0; padding-left: 1.4em; }
+.note-meta { margin-top: 8px; }
+a.note-tag { color: var(--text); }
+a.note-tag:hover { text-decoration: none; outline: 1px solid var(--accent); }
+.note-date { margin-left: auto; }
+.note-form { max-width: 40rem; }
+.note-form input:not([type=radio]), .note-form select { width: 100%; }
+.note-form .note-source { margin-bottom: 4px; }
+.source-choice { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 14px 10px; margin: 0 0 6px; }
+.source-choice legend { font-weight: 600; font-size: 0.9rem; padding: 0 4px; }
+.source-choice label { display: flex; gap: 8px; align-items: baseline; margin: 6px 0; font-weight: 400; }
+.source-choice input { width: auto; accent-color: var(--accent); }
+.note-form .kb-actions { margin-top: 6px; align-items: center; }
+
 /* --- Can't search page ----------------------------------------------------- */
 .ocr-panel { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 14px 18px; margin: 18px 0 26px; box-shadow: var(--shadow); }
 .ocr-panel h2 { margin: 0 0 4px; }

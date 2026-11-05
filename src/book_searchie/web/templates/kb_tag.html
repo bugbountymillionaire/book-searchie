@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_note_card.html" import note_card %}
+{% block title %}{{ tag_name }} · KB · Book-Searchie{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/kb">← KB</a></p>
+<h1>{{ tag_name }} <span class="dim kb-kind-label">{{ kind }}</span></h1>
+<p class="lede">{{ count }} note{{ 's' if count != 1 }}.</p>
+
+{% if other_kinds %}
+<nav class="kb-group-by" aria-label="Group notes by">
+  <span class="dim">Group by</span>
+  {% for k in other_kinds %}<a class="chip{{ ' current' if k == by }}" href="{{ by_url(k) }}"{% if k == by %} aria-current="true"{% endif %}>{{ k|capitalize }}</a>{% endfor %}
+  <a class="chip{{ ' current' if not by }}" href="{{ by_url('none') }}"{% if not by %} aria-current="true"{% endif %}>Don't group</a>
+</nav>
+{% endif %}
+
+{% for group in groups %}
+<section class="kb-group">
+  {% if group.name %}<h2>{% if group.url %}<a href="{{ group.url }}">{{ group.name }}</a>{% else %}<span class="dim">{{ group.name }}</span>{% endif %} <span class="dim count">{{ group.cards|length }}</span></h2>{% endif %}
+  {% for card in group.cards %}{{ note_card(card) }}{% endfor %}
+</section>
+{% endfor %}
+{% endblock %}
+{% block scripts %}<script src="/static/kb_page.js?v={{ static_version }}"></script>{% endblock %}
