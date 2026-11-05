@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import Body, FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -24,6 +25,7 @@ from ..problems import PROBLEMS, detail, group_problems
 from ..search import QueryError, fill_snippets, matching_seqs, search
 from . import opener, render
 from .jobs import OcrBusy, OcrJob
+from .notes_api import add_notes_routes
 
 HERE = Path(__file__).parent
 BOOKS_PER_PAGE = 10
@@ -119,6 +121,16 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
             request, "error.html", {"message": exc.detail, "q": "", "topic": "", "topics": [], "problem_count": 0},
             status_code=exc.status_code,
         )
+
+    @app.exception_handler(RequestValidationError)
+    async def bad_request(request: Request, exc: RequestValidationError):
+        problems = []
+        for err in exc.errors():
+            where = ".".join(str(part) for part in err.get("loc", ()) if part != "body")
+            problems.append(f"{where}: {err.get('msg')}" if where else str(err.get("msg")))
+        return JSONResponse({"error": "That request isn't right. " + "; ".join(problems)}, status_code=422)
+
+    add_notes_routes(app, config, open_db, _require_app_header)
 
     # --- Search ------------------------------------------------------------
 
