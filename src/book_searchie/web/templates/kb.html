@@ -7,7 +7,10 @@
     <h1>KB</h1>
     <p class="lede">{% if total %}{{ total }} note{{ 's' if total != 1 }} in your knowledge base.{% else %}Your knowledge base is empty so far.{% endif %}</p>
   </div>
-  <a class="button primary" href="/kb/new">New note</a>
+  <div class="kb-top-actions">
+    {% if total %}<a class="button" href="/kb/tags">Tags and backup</a>{% endif %}
+    <a class="button primary" href="/kb/new">New note</a>
+  </div>
 </div>
 
 {% if not total %}

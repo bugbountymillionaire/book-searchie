@@ -107,7 +107,8 @@ def test_tags_autocomplete(client, db):
     client.post("/api/notes", json={**OWN, "tags": [{"kind": "plant", "name": "nettle"},
                                                     {"kind": "condition", "name": "Nerves"}]}, headers=H)
     assert client.get("/api/tags", params={"q": "ne"}).json()["tags"] == [
-        {"kind": "plant", "name": "Nettle", "notes": 2}, {"kind": "condition", "name": "Nerves", "notes": 1}]
+        {"kind": "plant", "name": "Nettle", "notes": 2, "aliases": []},
+        {"kind": "condition", "name": "Nerves", "notes": 1, "aliases": []}]
     assert [t["name"] for t in client.get("/api/tags", params={"kind": "condition"}).json()["tags"]] == ["Nerves"]
 
 

@@ -85,7 +85,89 @@ def _build_parser() -> argparse.ArgumentParser:
     # Used by the web UI, which runs OCR as a separate process and follows its progress.
     p.add_argument("--progress-json", action="store_true", help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_ocr)
+
+    notes = sub.add_parser("notes", help="back up or restore your KB notes")
+    notes_sub = notes.add_subparsers(metavar="action")
+    p = notes_sub.add_parser(
+        "export", help="save your notes to a file",
+        description="Save your KB notes. JSON is a complete backup that 'notes import' can restore; "
+        "Markdown is for reading (one file, or one file per tag with --per-tag).",
+    )
+    p.add_argument("dest", help="file to write, or a folder with --per-tag; - writes to the screen")
+    p.add_argument("-f", "--format", choices=("json", "md"), default="json", help="json (default) or md (Markdown)")
+    p.add_argument("--per-tag", action="store_true", help="Markdown only: one file per tag, in the folder DEST")
+    p.set_defaults(func=cmd_notes_export)
+    p = notes_sub.add_parser(
+        "import", help="restore notes from a JSON backup",
+        description="Restore a JSON backup made with 'notes export'. Only into an empty KB, unless "
+        "--replace is given; then a copy of the current notes is saved first.",
+    )
+    p.add_argument("file", help="the JSON backup")
+    p.add_argument("--replace", action="store_true", help="replace every note in your KB with the backup")
+    p.set_defaults(func=cmd_notes_import)
+    notes.set_defaults(func=lambda args: (notes.print_help(), 1)[1])
     return parser
+
+
+def cmd_notes_export(args) -> int:
+    from .notes import NotesStore
+    from .notes_backup import export_json_text, export_markdown, export_markdown_per_tag
+
+    config = load_config(args.config)
+    if not config.notes_path.is_file():
+        print(f"error: there are no notes yet ({config.notes_path} doesn't exist)", file=sys.stderr)
+        return 2
+    if args.per_tag and args.format != "md":
+        print("error: --per-tag is for Markdown; add --format md", file=sys.stderr)
+        return 2
+    with NotesStore.open(config.notes_path) as store:
+        count = store.count()
+        if args.per_tag:
+            if args.dest == "-":
+                print("error: --per-tag writes a folder of files; give a folder name", file=sys.stderr)
+                return 2
+            folder = Path(args.dest)
+            files = export_markdown_per_tag(store)
+            for name, text in files.items():
+                path = folder / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            print(f"Wrote {len(files)} files for {count} notes to {folder}", file=sys.stderr)
+            return 0
+        text = export_json_text(store) if args.format == "json" else export_markdown(store)
+    if args.dest == "-":
+        sys.stdout.write(text)
+    else:
+        Path(args.dest).write_text(text, encoding="utf-8")
+        print(f"Wrote {count} notes to {args.dest}", file=sys.stderr)
+    return 0
+
+
+def cmd_notes_import(args) -> int:
+    import json
+
+    from .notes import NotesError, NotesStore
+    from .notes_backup import RestoreError, restore
+
+    config = load_config(args.config)
+    try:
+        data = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        print(f"error: {args.file} not found", file=sys.stderr)
+        return 2
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        print(f"error: {args.file} isn't a JSON backup ({e})", file=sys.stderr)
+        return 2
+    try:
+        with NotesStore.open(config.notes_path) as store:
+            had = store.count()
+            restored = restore(store, data, replace=args.replace, notes_path=config.notes_path)
+    except (RestoreError, NotesError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(f"Restored {restored} notes" + (f", replacing {had} (a copy of those was saved first)" if had else "") + ".")
+    print("Run 'book-searchie index' to check that the books your notes came from are still there.")
+    return 0
 
 
 def _open_index(config: Config) -> Database:

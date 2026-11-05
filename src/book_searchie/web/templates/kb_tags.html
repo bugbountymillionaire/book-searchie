@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Tags and backup · KB · Book-Searchie{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/kb">← KB</a></p>
+<h1>Tags and backup</h1>
+
+<section class="kb-tidy" id="kb-tidy">
+  <h2>Tidy your tags</h2>
+  <p class="lede">Rename a tag to fix its spelling. Renaming it to a tag you already have merges the two, and the
+    old name is kept as another name for it. Other names (such as <em>Urtica dioica</em> for <em>Nettle</em>)
+    find the tag when you search, browse or type them in a tag field.</p>
+  {% for kind, kind_tags in kinds.items() %}
+  <h3>{{ kind|capitalize }}</h3>
+  {% if kind_tags %}
+  <ul class="tidy-list" data-kind="{{ kind }}"
+      data-lookup="{{ lookup.get(kind, {})|tojson|forceescape }}">
+    {% for t in kind_tags %}
+    <li data-name="{{ t.name }}">
+      <div class="tidy-row">
+        <a class="tidy-name" href="{{ t.url }}">{{ t.name }}</a>
+        <span class="dim">{{ t.notes }} note{{ 's' if t.notes != 1 }}</span>
+        {% for a in t.aliases %}<span class="alias">{{ a }} <button type="button" class="remove-alias" data-alias="{{ a }}" title="Remove &quot;{{ a }}&quot;" aria-label="Remove the other name {{ a }}">×</button></span>{% endfor %}
+      </div>
+      <details class="tidy-edit">
+        <summary>Edit</summary>
+        <form class="tidy-form rename-form">
+          <label>Rename to <input name="new_name" value="{{ t.name }}" maxlength="60" required></label>
+          <button type="submit" class="small">Rename</button>
+        </form>
+        <form class="tidy-form alias-form">
+          <label>Add another name <input name="alias" maxlength="60" required placeholder="e.g. a Latin or local name"></label>
+          <button type="submit" class="small">Add</button>
+        </form>
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="dim small">No {{ kind }} tags yet.</p>{% endif %}
+  {% endfor %}
+</section>
+
+<section class="kb-backup">
+  <h2>Back up your KB</h2>
+  <p>Your notes are your own work, and unlike the search index they can't be rebuilt from your books. They're kept in
+    <code>{{ notes_path }}</code>: include that file in your backups.</p>
+  {% if total %}
+  <p class="backup-links">
+    <a class="button" href="/kb/export?format=json" download>Download a backup (JSON)</a>
+    <a class="button" href="/kb/export?format=md" download>Download as Markdown</a>
+  </p>
+  <p class="dim small">The JSON file has everything, and can be restored with
+    <code>book-searchie notes import FILE</code>. The Markdown file is for reading, printing or using elsewhere.
+    From the command line: <code>book-searchie notes export backup.json</code>, or
+    <code>book-searchie notes export --format md --per-tag FOLDER</code> for one file per tag.</p>
+  {% else %}<p class="dim">There are no notes to back up yet.</p>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/kb_page.js?v={{ static_version }}"></script>{% endblock %}

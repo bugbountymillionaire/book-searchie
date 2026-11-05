@@ -96,3 +96,70 @@
     if (dirty) e.preventDefault();
   });
 })();
+
+// --- Tags and backup page: rename or merge tags, and their other names --------------
+(function () {
+  const HEADERS = { "Content-Type": "application/json", "X-Book-Searchie": "1" };
+  const section = document.getElementById("kb-tidy");
+  if (!section) return;
+
+  async function send(method, url, body) {
+    let res;
+    try {
+      res = await fetch(url, { method, headers: HEADERS, body: body && JSON.stringify(body) });
+    } catch (e) {
+      throw new Error("Couldn't reach Book-Searchie. Is it still running?");
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Something went wrong (${res.status}).`);
+    return data;
+  }
+
+  section.querySelectorAll(".tidy-list").forEach((list) => {
+    const kind = list.dataset.kind;
+    const lookup = JSON.parse(list.dataset.lookup || "{}");
+
+    list.querySelectorAll("li").forEach((item) => {
+      const name = item.dataset.name;
+
+      item.querySelector(".rename-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const newName = e.target.elements.new_name.value.replace(/\s+/g, " ").trim();
+        if (!newName || newName === name) return;
+        const existing = lookup[newName.toLowerCase()];
+        if (existing && existing !== name &&
+            !confirm(`"${existing}" is already a ${kind} tag. Merge "${name}" into it? ` +
+                     `Notes with either tag will have "${existing}", and "${name}" becomes another name for it.`)) return;
+        try {
+          await send("POST", "/api/tags/rename", { kind, name, new_name: newName });
+          location.reload();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      item.querySelector(".alias-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+          await send("POST", "/api/tags/aliases", { kind, name, alias: e.target.elements.alias.value });
+          location.reload();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      item.querySelectorAll(".remove-alias").forEach((button) =>
+        button.addEventListener("click", async () => {
+          const alias = button.dataset.alias;
+          if (!confirm(`Remove "${alias}" as another name for "${name}"?`)) return;
+          try {
+            await send("DELETE", `/api/tags/aliases?${new URLSearchParams({ kind, alias })}`);
+            button.closest(".alias").remove();
+          } catch (err) {
+            alert(err.message);
+          }
+        })
+      );
+    });
+  });
+})();

@@ -87,6 +87,8 @@ book-searchie serve           # opens http://localhost:8004 in your browser
 | `topics` | List topics and how many books each has |
 | `report` | List books that can't be searched (scanned, password-protected, DRM, damaged), and how to fix each |
 | `ocr [BOOK]... [-l LANG]` | Make scanned books searchable with OCR (see [Books that can't be searched](#books-that-cant-be-searched)) |
+| `notes export DEST [--format json\|md] [--per-tag]` | Save your KB notes: JSON is a complete backup, Markdown is for reading (`--per-tag` writes one file per tag into the folder `DEST`). `-` writes to the screen |
+| `notes import FILE [--replace]` | Restore a JSON backup. Only into an empty KB, unless `--replace` is given; then a copy of the current notes is saved first |
 
 > **Windows PowerShell 5.1 tip:** it strips double quotes from arguments, so `'"black cohosh"'` arrives as two separate words. Escape them: `book-searchie search '\"black cohosh\"'`. Command Prompt and PowerShell 7+ don't have this problem.
 
@@ -123,6 +125,10 @@ prefer = "epub"                   # same book as PDF and EPUB in one folder: sea
 [index]
 path = "book-searchie.db"         # SQLite index file
 
+[notes]
+path = "book-searchie-notes.db"   # your KB notes: your own work, so back this file up
+tag_kinds = ["subject", "use"]    # the kinds of tag you give notes, e.g. ["plant", "condition"]
+
 [server]
 mode = "local"                    # only "local" for now (network mode may come later, on request)
 host = "127.0.0.1"
@@ -138,9 +144,18 @@ Environment variables override the config file, which is handy for scripts and s
 | `BOOK_SEARCHIE_EXCLUDE` | `library.exclude`, comma-separated |
 | `BOOK_SEARCHIE_PREFER` | `library.prefer` (`epub` or `pdf`) |
 | `BOOK_SEARCHIE_INDEX` | `index.path` |
+| `BOOK_SEARCHIE_NOTES` | `notes.path` |
 | `BOOK_SEARCHIE_MODE`, `_HOST`, `_PORT` | `server.mode`, `server.host`, `server.port` |
 
 If `BOOK_SEARCHIE_ROOTS` is set, no config file is needed at all.
+
+### Backing up your notes
+
+The search index can always be rebuilt from your books, but your KB notes are your own work and can't be. They're
+kept in their own file, `book-searchie-notes.db` by default, which you should include in your backups. You can also
+download a backup from the KB's *Tags and backup* page, or run `book-searchie notes export backup.json`; restore it
+with `book-searchie notes import backup.json`. When an update to Book-Searchie changes how notes are stored, a copy
+of the notes file is saved first, next to it (e.g. `book-searchie-notes.db.v1.bak`).
 
 ---
 

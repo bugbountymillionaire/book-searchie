@@ -8,6 +8,9 @@ from book_searchie.notes import Note, NoteInvalid, NotesError, NotesStore, Tag
 from book_searchie.search import QueryError
 
 
+CURRENT = len(notes_mod._MIGRATIONS)
+
+
 @pytest.fixture
 def store(tmp_path):
     with NotesStore.open(tmp_path / "notes.db") as s:
@@ -241,15 +244,15 @@ def test_migration_keeps_notes_and_makes_a_copy(tmp_path, monkeypatch):
         notes_mod, "_MIGRATIONS", [*notes_mod._MIGRATIONS, "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"]
     )
     with NotesStore.open(path) as s:
-        assert s.schema_version == 2
+        assert s.schema_version == CURRENT + 1
         kept = s.get(note.id)
         assert (kept.title, kept.tags, kept.source_ref) == (note.title, note.tags, note.source_ref)
         assert s.conn.execute("SELECT pinned FROM notes").fetchone()[0] == 0
         assert len(s.search("nettle")) == 1
 
-    backup = tmp_path / "notes.db.v1.bak"
+    backup = tmp_path / f"notes.db.v{CURRENT}.bak"
     conn = sqlite3.connect(backup)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT
     assert conn.execute("SELECT title FROM notes").fetchall() == [("Nettle soup",)]
     conn.close()
 
@@ -266,7 +269,7 @@ def test_failed_migration_changes_nothing(tmp_path, monkeypatch):
         NotesStore.open(path)
     monkeypatch.undo()
     with NotesStore.open(path) as s:
-        assert s.schema_version == 1
+        assert s.schema_version == CURRENT
         assert s.count() == 1
         assert "pinned" not in [r[1] for r in s.conn.execute("PRAGMA table_info(notes)")]
 
@@ -322,3 +325,26 @@ def test_snippet_comes_from_the_quote_or_text(store):
     assert snippets["Nettle"] == "Spring greens, cooked like spinach."  # not the title again
     assert snippets["Soup"] == "A good [nettle] soup."
     assert snippets["Bare"] == "Nothing to see."  # only the tag matched
+
+
+def test_upgrading_a_version_1_file(tmp_path):
+    """A notes file from before aliases (KB step 7) is upgraded, keeping everything."""
+    path = tmp_path / "notes.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(f"BEGIN; {notes_mod._MIGRATIONS[0]}; PRAGMA user_version = 1; COMMIT;")
+    conn.execute("INSERT INTO notes (source_type, title, body, topic, created, updated)"
+                 " VALUES ('own', 'Old note', 'Nettle soup', 'Herbalism', '2026-11-05T10:00:00+00:00',"
+                 " '2026-11-05T10:00:00+00:00')")
+    conn.execute("INSERT INTO tags (kind, name) VALUES ('plant', 'Nettle')")
+    conn.execute("INSERT INTO note_tags VALUES (1, 1)")
+    conn.execute("INSERT INTO notes_fts (rowid, title, quote, body, source_ref, tags)"
+                 " VALUES (1, 'Old note', '', 'Nettle soup', '', 'Nettle')")
+    conn.commit()
+    conn.close()
+    with NotesStore.open(path) as s:
+        assert s.schema_version == CURRENT
+        note = s.get(1)
+        assert (note.title, note.tags, note.updated) == ("Old note", [Tag("plant", "Nettle")], "2026-11-05T10:00:00+00:00")
+        s.add_alias("plant", "Nettle", "Urtica dioica")
+        assert [h.note.id for h in s.search("urtica")] == [1]
+    assert (tmp_path / "notes.db.v1.bak").is_file()

@@ -5,12 +5,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from urllib.parse import quote
 
+from datetime import date
+
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse, Response
 
 from .. import markdown
 from ..config import Config
 from ..db import Database
 from ..notes import Note
+from ..notes_backup import export_json_text, export_markdown
 from .notes_api import file_ids, open_notes_for
 
 NOTES_PER_PAGE = 20
@@ -95,9 +99,47 @@ def add_kb_pages(app: FastAPI, config: Config, open_db: Callable[[], Database], 
                 tags=[{"kind": t.kind, "name": t.name} for t in note.tags], form_kinds=kinds,
             )
 
+    @app.get("/kb/tags")
+    def kb_tags(request: Request):
+        """Tidying tags (rename, merge, other names) and backing up the KB."""
+        with open_db() as db, open_notes_for(config, create=False) as store:
+            kinds = {kind: [] for kind in config.tag_kinds}
+            lookup: dict[str, dict[str, str]] = {}  # per kind: any name, in lower case -> the tag's name
+            for t in store.tags(by_name=True) if store else []:
+                kinds.setdefault(t.kind, []).append(
+                    {"name": t.name, "notes": t.notes, "aliases": t.aliases, "url": tag_url(t.kind, t.name)}
+                )
+                for n in [t.name, *t.aliases]:
+                    lookup.setdefault(t.kind, {})[n.lower()] = t.name
+            return page(
+                request, "kb_tags.html", db, section="kb", kinds=kinds, lookup=lookup,
+                total=store.count() if store else 0,
+                notes_path=config.notes_path,
+            )
+
+    @app.get("/kb/export")
+    def kb_export(format: str = "json"):
+        """Download the KB: JSON (a full backup) or Markdown (for reading)."""
+        if format not in ("json", "md"):
+            raise HTTPException(400, "The format must be json or md.")
+        with open_notes_for(config, create=False) as store:
+            if store is None:
+                raise HTTPException(404, "There are no notes to export yet.")
+            text = export_json_text(store) if format == "json" else export_markdown(store)
+        name = f"book-searchie-notes-{date.today():%Y-%m-%d}.{format}"
+        return Response(
+            text, media_type="application/json" if format == "json" else "text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"},
+        )
+
     @app.get("/kb/tag/{kind}/{name:path}")
     def kb_tag(request: Request, kind: str, name: str, by: str = ""):
         with open_db() as db, open_notes_for(config, create=False) as store:
+            # Another name for a tag (an alias, or other capitals) goes to the tag's own page.
+            main = store.resolve_tag(kind, name) if store else None
+            if main is not None and (main != name or kind != kind.lower()):
+                url = tag_url(kind.lower(), main) + (f"?by={quote(by)}" if by else "")
+                return RedirectResponse(url, status_code=307)
             notes = store.with_tag(kind, name) if store else []
             if not notes:
                 raise HTTPException(404, f"No notes in your KB have the tag \"{name}\".")

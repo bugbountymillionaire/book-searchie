@@ -67,6 +67,18 @@ def file_ids(db: Database, notes: list[Note]) -> dict[str, int]:
     return {r["path"]: r["id"] for r in rows}
 
 
+class TagRenameIn(BaseModel):
+    kind: str
+    name: str
+    new_name: str
+
+
+class AliasIn(BaseModel):
+    kind: str
+    name: str  # the tag
+    alias: str  # another name for it
+
+
 def add_notes_routes(
     app: FastAPI,
     config: Config,
@@ -209,5 +221,40 @@ def add_notes_routes(
             found = store.tags(kind=kind or None, prefix=q, limit=min(max(limit, 1), 200)) if store else []
         return {
             "kinds": config.tag_kinds,
-            "tags": [{"kind": t.kind, "name": t.name, "notes": t.notes} for t in found],
+            "tags": [{"kind": t.kind, "name": t.name, "notes": t.notes, "aliases": t.aliases} for t in found],
         }
+
+    # --- Tidying tags ---------------------------------------------------------------
+
+    def tidy(action):
+        try:
+            return action()
+        except NoteInvalid as e:
+            raise HTTPException(400, str(e)) from None
+
+    @app.post("/api/tags/rename")
+    def rename_tag(data: TagRenameIn, x_book_searchie: str | None = Header(default=None)):
+        """Rename a tag on every note; renaming to an existing tag merges the two."""
+        require_app_header(x_book_searchie)
+        with open_notes(create=False) as store:
+            if store is None:
+                raise HTTPException(404, "There are no tags yet.")
+            name, merged = tidy(lambda: store.rename_tag(data.kind, data.name, data.new_name))
+        return {"kind": data.kind.strip().lower(), "name": name, "merged": merged}
+
+    @app.post("/api/tags/aliases")
+    def add_alias(data: AliasIn, x_book_searchie: str | None = Header(default=None)):
+        require_app_header(x_book_searchie)
+        with open_notes(create=False) as store:
+            if store is None:
+                raise HTTPException(404, "There are no tags yet.")
+            aliases = tidy(lambda: store.add_alias(data.kind, data.name, data.alias))
+        return {"aliases": aliases}
+
+    @app.delete("/api/tags/aliases")
+    def remove_alias(kind: str, alias: str, x_book_searchie: str | None = Header(default=None)):
+        require_app_header(x_book_searchie)
+        with open_notes(create=False) as store:
+            if store is None or not store.remove_alias(kind, alias):
+                raise HTTPException(404, "There's no tag with that name.")
+        return {"deleted": alias}

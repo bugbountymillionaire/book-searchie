@@ -80,6 +80,18 @@ _MIGRATIONS = [
         tokenize='unicode61 remove_diacritics 2'
     );
     """,
+    # 2: other names for a tag ("Urtica dioica" for Nettle). Unique within a kind, and
+    # never the same as a tag of that kind.
+    """
+    CREATE TABLE tag_aliases (
+        id INTEGER PRIMARY KEY,
+        tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL COLLATE NOCASE,
+        alias TEXT NOT NULL COLLATE NOCASE,
+        UNIQUE (kind, alias)
+    );
+    CREATE INDEX tag_aliases_tag ON tag_aliases(tag_id);
+    """,
 ]
 
 # bm25 weights for title, quote, body, source_ref, tags.
@@ -145,6 +157,7 @@ class TagCount:
     kind: str
     name: str
     notes: int
+    aliases: list[str] = field(default_factory=list)
 
 
 def _clean(value: str | None) -> str:
@@ -153,6 +166,16 @@ def _clean(value: str | None) -> str:
 
 def _norm_tag(value: str) -> str:
     return " ".join(value.split())
+
+
+def clean_tag_name(name: str) -> str:
+    """A tag name or alias, tidied, or raise NoteInvalid."""
+    name = _norm_tag(name or "")
+    if not name:
+        raise NoteInvalid("A tag needs a name.")
+    if len(name) > TAG_MAX:
+        raise NoteInvalid(f"Tags can be at most {TAG_MAX} characters.")
+    return name
 
 
 def validate(note: Note) -> Note:
@@ -332,6 +355,84 @@ class NotesStore:
             self._drop_unused_tags()
         return True
 
+    # --- tidying tags ---
+
+    def resolve_tag(self, kind: str, name: str) -> str | None:
+        """The tag's own name, given its name in any capitals or one of its aliases."""
+        tag_id = self._tag_id(kind.strip().lower(), _norm_tag(name))
+        if tag_id is None:
+            return None
+        return self.conn.execute("SELECT name FROM tags WHERE id = ?", (tag_id,)).fetchone()[0]
+
+    def rename_tag(self, kind: str, name: str, new_name: str) -> tuple[str, bool]:
+        """Rename a tag on every note that has it. If a tag (or alias) of that kind already
+        has the new name, the two are merged, and the old name becomes an alias of the tag
+        it was merged into, so typing it later still finds it.
+
+        Returns (the tag's name now, whether it was merged).
+        """
+        kind, new_name = kind.strip().lower(), clean_tag_name(new_name)
+        with self.conn:
+            tag_id = self._tag_id(kind, _norm_tag(name), aliases=False)
+            if tag_id is None:
+                raise NoteInvalid(f"There's no {kind} tag called \"{name}\".")
+            old_name = self.conn.execute("SELECT name FROM tags WHERE id = ?", (tag_id,)).fetchone()[0]
+            target = self._tag_id(kind, new_name)
+            if target is None or target == tag_id:
+                # A new name, or the same one in different capitals.
+                self.conn.execute("DELETE FROM tag_aliases WHERE kind = ? AND alias = ?", (kind, new_name))
+                self.conn.execute("UPDATE tags SET name = ? WHERE id = ?", (new_name, tag_id))
+                self._reindex_tag(tag_id)
+                return new_name, False
+            self.conn.execute(
+                "INSERT OR IGNORE INTO note_tags (note_id, tag_id) SELECT note_id, ? FROM note_tags WHERE tag_id = ?",
+                (target, tag_id),
+            )
+            self.conn.execute("UPDATE tag_aliases SET tag_id = ? WHERE tag_id = ?", (target, tag_id))
+            self.conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+            self.conn.execute(
+                "INSERT OR IGNORE INTO tag_aliases (tag_id, kind, alias) VALUES (?, ?, ?)", (target, kind, old_name)
+            )
+            self._reindex_tag(target)
+            return self.conn.execute("SELECT name FROM tags WHERE id = ?", (target,)).fetchone()[0], True
+
+    def add_alias(self, kind: str, name: str, alias: str) -> list[str]:
+        """Give a tag another name. Returns the tag's aliases."""
+        kind, alias = kind.strip().lower(), clean_tag_name(alias)
+        with self.conn:
+            tag_id = self._tag_id(kind, _norm_tag(name), aliases=False)
+            if tag_id is None:
+                raise NoteInvalid(f"There's no {kind} tag called \"{name}\".")
+            other = self._tag_id(kind, alias)
+            if other == tag_id:
+                raise NoteInvalid(f"\"{alias}\" is already a name for this tag.")
+            if other is not None:
+                other_name = self.conn.execute("SELECT name FROM tags WHERE id = ?", (other,)).fetchone()[0]
+                raise NoteInvalid(
+                    f"\"{alias}\" is already the {kind} tag \"{other_name}\" or one of its other names. "
+                    "To make them one tag, rename one to the other."
+                )
+            self.conn.execute("INSERT INTO tag_aliases (tag_id, kind, alias) VALUES (?, ?, ?)", (tag_id, kind, alias))
+            self._reindex_tag(tag_id)
+        return self.aliases_of(tag_id)
+
+    def remove_alias(self, kind: str, alias: str) -> bool:
+        kind, alias = kind.strip().lower(), _norm_tag(alias)
+        with self.conn:
+            row = self.conn.execute(
+                "SELECT tag_id FROM tag_aliases WHERE kind = ? AND alias = ?", (kind, alias)
+            ).fetchone()
+            if row is None:
+                return False
+            self.conn.execute("DELETE FROM tag_aliases WHERE kind = ? AND alias = ?", (kind, alias))
+            self._reindex_tag(row[0])
+            self._drop_unused_tags()
+        return True
+
+    def aliases_of(self, tag_id: int) -> list[str]:
+        rows = self.conn.execute("SELECT alias FROM tag_aliases WHERE tag_id = ? ORDER BY alias", (tag_id,))
+        return [r[0] for r in rows]
+
     # --- keeping book notes attached to their books (called by the indexer) ---
 
     def move_book(self, old_path: str, new_path: str, topic: str, book_title: str) -> int:
@@ -368,21 +469,47 @@ class NotesStore:
 
     def _set_tags(self, note_id: int, tags: list[Tag]) -> None:
         for tag in tags:
-            # A tag keeps the spelling it was first given; "Nettle" and "nettle" are one tag.
-            self.conn.execute("INSERT OR IGNORE INTO tags (kind, name) VALUES (?, ?)", (tag.kind, tag.name))
-            tag_id = self.conn.execute(
-                "SELECT id FROM tags WHERE kind = ? AND name = ?", (tag.kind, tag.name)
-            ).fetchone()[0]
+            # An alias stands for its tag. Otherwise a tag keeps the spelling it was first
+            # given: "Nettle" and "nettle" are one tag.
+            tag_id = self._tag_id(tag.kind, tag.name)
+            if tag_id is None:
+                tag_id = self.conn.execute(
+                    "INSERT INTO tags (kind, name) VALUES (?, ?)", (tag.kind, tag.name)
+                ).lastrowid
             self.conn.execute("INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?, ?)", (note_id, tag_id))
 
+    def _tag_id(self, kind: str, name: str, *, aliases: bool = True) -> int | None:
+        """The tag with this name, or that has it as an alias."""
+        row = self.conn.execute("SELECT id FROM tags WHERE kind = ? AND name = ?", (kind, name)).fetchone()
+        if row is None and aliases:
+            row = self.conn.execute(
+                "SELECT tag_id FROM tag_aliases WHERE kind = ? AND alias = ?", (kind, name)
+            ).fetchone()
+        return row[0] if row else None
+
     def _drop_unused_tags(self) -> None:
-        self.conn.execute("DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM note_tags)")
+        # Tags with aliases are kept, so the aliases aren't lost while no note has the tag.
+        self.conn.execute(
+            "DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM note_tags)"
+            " AND id NOT IN (SELECT tag_id FROM tag_aliases)"
+        )
+
+    def _reindex_tag(self, tag_id: int) -> None:
+        for (note_id,) in self.conn.execute("SELECT note_id FROM note_tags WHERE tag_id = ?", (tag_id,)).fetchall():
+            self._reindex(note_id)
 
     def _reindex(self, note_id: int) -> None:
         row = self.conn.execute(
             "SELECT title, quote, body, COALESCE(source_ref, '') AS source_ref FROM notes WHERE id = ?", (note_id,)
         ).fetchone()
-        tags = " ".join(t.name for t in self._tags_of(note_id))
+        # A note's tags and their aliases, so searching "Urtica dioica" finds notes tagged Nettle.
+        names = self.conn.execute(
+            "SELECT t.name FROM note_tags nt JOIN tags t ON t.id = nt.tag_id WHERE nt.note_id = ?1"
+            " UNION ALL SELECT a.alias FROM note_tags nt JOIN tag_aliases a ON a.tag_id = nt.tag_id"
+            " WHERE nt.note_id = ?1",
+            (note_id,),
+        ).fetchall()
+        tags = " ".join(r[0] for r in names)
         self.conn.execute("DELETE FROM notes_fts WHERE rowid = ?", (note_id,))
         self.conn.execute(
             "INSERT INTO notes_fts (rowid, title, quote, body, source_ref, tags) VALUES (?, ?, ?, ?, ?, ?)",
@@ -420,12 +547,18 @@ class NotesStore:
         return self.conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0]
 
     def with_tag(self, kind: str, name: str) -> list[Note]:
+        """Notes with a tag, given its name or one of its aliases."""
+        tag_id = self._tag_id(kind.strip().lower(), _norm_tag(name))
         rows = self.conn.execute(
-            "SELECT n.* FROM notes n JOIN note_tags nt ON nt.note_id = n.id JOIN tags t ON t.id = nt.tag_id"
-            " WHERE t.kind = ? AND t.name = ? ORDER BY n.updated DESC, n.id DESC",
-            (kind.strip().lower(), _norm_tag(name)),
+            "SELECT n.* FROM notes n JOIN note_tags nt ON nt.note_id = n.id"
+            " WHERE nt.tag_id = ? ORDER BY n.updated DESC, n.id DESC",
+            (tag_id,),
         )
         return [self._note(r) for r in rows]
+
+    def all_notes(self) -> list[Note]:
+        """Every note, oldest first (for exporting)."""
+        return [self._note(r) for r in self.conn.execute("SELECT * FROM notes ORDER BY id")]
 
     def for_page(self, path: str, seq: int) -> list[Note]:
         """Book notes saved from one page or chapter, oldest first."""
@@ -437,9 +570,12 @@ class NotesStore:
     def tags(
         self, kind: str | None = None, prefix: str = "", limit: int | None = None, *, by_name: bool = False
     ) -> list[TagCount]:
-        """Tags in use with their note counts, most used first (or A to Z). prefix is for autocomplete."""
+        """Tags in use with their note counts and aliases, most used first (or A to Z).
+
+        prefix is for autocomplete: it matches the start of a tag's name or of one of its aliases.
+        """
         sql = (
-            "SELECT t.kind, t.name, COUNT(nt.note_id) AS notes FROM tags t"
+            "SELECT t.id, t.kind, t.name, COUNT(nt.note_id) AS notes FROM tags t"
             " JOIN note_tags nt ON nt.tag_id = t.id WHERE 1"
         )
         params: list = []
@@ -447,13 +583,20 @@ class NotesStore:
             sql += " AND t.kind = ?"
             params.append(kind.strip().lower())
         if prefix.strip():
-            sql += " AND t.name LIKE ? ESCAPE '\\'"
-            params.append(re.sub(r"([\\%_])", r"\\\1", _norm_tag(prefix)) + "%")
+            like = re.sub(r"([\\%_])", r"\\\1", _norm_tag(prefix)) + "%"
+            sql += (
+                " AND (t.name LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM tag_aliases a"
+                " WHERE a.tag_id = t.id AND a.alias LIKE ? ESCAPE '\\'))"
+            )
+            params += [like, like]
         sql += " GROUP BY t.id ORDER BY " + ("t.name" if by_name else "notes DESC, t.name")
         if limit:
             sql += " LIMIT ?"
             params.append(limit)
-        return [TagCount(r["kind"], r["name"], r["notes"]) for r in self.conn.execute(sql, params)]
+        return [
+            TagCount(r["kind"], r["name"], r["notes"], self.aliases_of(r["id"]))
+            for r in self.conn.execute(sql, params).fetchall()
+        ]
 
     def search(
         self,

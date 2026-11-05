@@ -303,6 +303,26 @@ a.note-tag:hover { text-decoration: none; outline: 1px solid var(--accent); }
 .note-hit .snippet { margin: 2px 0 6px; }
 .books-head { font-size: 1.1rem; margin: 0 0 10px; }
 
+/* --- Tags and backup page ------------------------------------------------------------ */
+.kb-top-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.kb-tidy h3 { font-size: 1rem; margin: 18px 0 6px; }
+.tidy-list { list-style: none; padding: 0; margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.tidy-list li { padding: 8px 14px; border-top: 1px solid var(--line); }
+.tidy-list li:first-child { border-top: 0; }
+.tidy-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.tidy-name { font-weight: 600; overflow-wrap: anywhere; }
+.tidy-row .dim { font-size: 0.85rem; }
+.alias { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 8px; border: 1px dashed var(--line); border-radius: 999px; font-size: 0.85rem; color: var(--dim); }
+.remove-alias { border: 0; background: none; padding: 0 5px; color: var(--dim); font-size: 1rem; line-height: 1.2; }
+.remove-alias:hover { color: var(--fail); }
+.tidy-edit summary { cursor: pointer; color: var(--accent); font-size: 0.85rem; margin-top: 2px; width: max-content; }
+.tidy-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.tidy-form label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.9rem; }
+.tidy-form input { padding: 4px 8px; min-width: 14rem; }
+.kb-backup { margin-top: 30px; }
+.kb-backup code { overflow-wrap: anywhere; }
+.backup-links { display: flex; flex-wrap: wrap; gap: 8px; }
+
 /* --- Can't search page ----------------------------------------------------- */
 .ocr-panel { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 14px 18px; margin: 18px 0 26px; box-shadow: var(--shadow); }
 .ocr-panel h2 { margin: 0 0 4px; }
