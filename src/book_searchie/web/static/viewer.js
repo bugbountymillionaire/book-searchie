@@ -68,15 +68,19 @@
 
   // --- Matches ------------------------------------------------------------------
   // EPUB matches are <mark>s in the text; PDF matches are boxes laid over the page image.
-  const matches = Array.from(document.querySelectorAll("#chapter mark, #page-wrap .hit-box"));
+  // A word the EPUB splits into pieces is marked in each piece: the first has the id,
+  // and all of them share data-m, so they're one match.
+  const matches = Array.from(document.querySelectorAll("#chapter mark[id], #page-wrap .hit-box"));
+  const pieces = (m) =>
+    m.dataset.m === undefined ? [m] : document.querySelectorAll(`#chapter mark[data-m="${m.dataset.m}"]`);
   const target = (m) => (m.classList.contains("hit-box") ? m.firstElementChild : m);
   const label = $("match-position");
   let current = -1;
 
   function showMatch(i, instant) {
-    matches.forEach((m) => m.classList.remove("current"));
+    document.querySelectorAll("#chapter mark.current, #page-wrap .hit-box.current").forEach((m) => m.classList.remove("current"));
     current = i;
-    matches[i].classList.add("current");
+    pieces(matches[i]).forEach((m) => m.classList.add("current"));
     reveal(target(matches[i]), instant ? "auto" : "smooth");
     label.textContent = `Match ${i + 1} of ${matches.length} here`;
     if (label.dataset.where) {
@@ -140,6 +144,24 @@
       showMatch(arrival.startsWith("#last") ? matches.length - 1 : 0, true);
       if (arrival.endsWith("wrap")) toast(WRAP_NOTE[arrival.startsWith("#last") ? -1 : 1]);
     });
+    // Pictures load after that (they're lazy), and one above the match pushes it down out
+    // of view. So keep the current match in view as the chapter grows, until the reader
+    // scrolls for themselves.
+    const chapter = $("chapter");
+    if (chapter && window.ResizeObserver) {
+      let follow = true;
+      const stop = () => (follow = false);
+      ["wheel", "touchstart", "mousedown"].forEach((ev) => window.addEventListener(ev, stop, { passive: true }));
+      window.addEventListener("keydown", (e) => {
+        if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(e.key)) stop();
+      });
+      let lastHeight = chapter.offsetHeight;
+      new ResizeObserver(() => {
+        if (chapter.offsetHeight === lastHeight) return;
+        lastHeight = chapter.offsetHeight;
+        if (follow && current >= 0) reveal(target(matches[current]), "auto");
+      }).observe(chapter);
+    }
   }
 
   // --- Open in the default app -------------------------------------------------

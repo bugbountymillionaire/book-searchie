@@ -328,3 +328,27 @@ def test_ocr_job_end_to_end(config, db, library, monkeypatch):
     s = job.status()
     assert s["finished"] and s["done"] == ["Herbalism/Scanned.pdf"] and not s["failed"], repr(s)
     assert db.conn.execute("SELECT ocr FROM files WHERE rel = 'Herbalism/Scanned.pdf'").fetchone()[0] == 1
+
+
+def test_epub_words_split_into_pieces_are_matched():
+    # Some EPUBs converted from PDFs split words for spacing; the index joins the pieces.
+    terms = query_terms("nettle")
+    html, marks = _sanitise('<p><span>STINGING </span>N<span class="x">ETTL</span><span>E</span> and nettle</p>'
+                            '<p>net</p><p>tle</p>', terms)
+    assert marks == 2
+    assert html == ('<p><span>STINGING </span><mark id="m0" data-m="0">N</mark><span><mark data-m="0">ETTL</mark>'
+                    '</span><span><mark data-m="0">E</mark></span> and <mark id="m1">nettle</mark></p>'
+                    '<p>net</p><p>tle</p>')  # paragraphs aren't joined, as in the index
+
+
+def test_epub_matches_counted_across_blocks():
+    terms = query_terms("x")
+    html, marks = _sanitise("<div>x<p>x</p>x<br/>x</div>", terms)
+    assert marks == 4 and [f'id="m{n}"' in html for n in range(4)] == [True] * 4
+
+
+def test_epub_images_keep_their_size():
+    # So the picture's room is saved before it loads, and the text doesn't jump.
+    html, _ = _sanitise('<img src="a.png" width="1610" height="1923px"/><img src="b.png" width="50%" height="x"/>', [])
+    assert html == ('<img src="a.png" alt="" width="1610" height="1923" loading="lazy">'
+                    '<img src="b.png" alt="" loading="lazy">')

@@ -51,6 +51,7 @@ h2 { font-size: 1.25rem; }
 code, pre { font: 0.9em/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; }
 pre { background: var(--surface-2); padding: 12px 14px; border-radius: var(--radius); overflow-x: auto; white-space: pre-wrap; }
 mark { background: var(--mark); color: var(--mark-text); border-radius: 2px; padding: 0 1px; }
+mark[data-m] { padding: 0; border-radius: 0; } /* a word split into pieces: no gaps between them */
 .dim { color: var(--dim); }
 [hidden] { display: none !important; }
 

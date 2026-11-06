@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 import pymupdf
 
-from ..extract import _Epub, _resolve
+from ..extract import _BLOCK_TAGS, _Epub, _resolve
 from ..highlight import Term, find_spans, fold, text_spans
 
 # PyMuPDF isn't thread-safe, and the web server handles requests on several threads.
@@ -167,7 +167,13 @@ IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
 class _Sanitizer(HTMLParser):
     """Re-emits an EPUB chapter keeping only plain formatting tags, with no attributes
     except image sources (rewritten to our asset route) and alt text. Matches are wrapped
-    in numbered <mark> elements for the viewer's next/previous buttons."""
+    in numbered <mark> elements for the viewer's next/previous buttons.
+
+    Text is matched a block (paragraph, heading, ...) at a time, joined across inline
+    elements the way the indexer joins it. Some EPUBs (often ones converted from PDFs)
+    split words into pieces for spacing, e.g. <span>N</span><span>ETTL</span>E. A match
+    split like that is marked in each piece; the first piece carries the match's id, and
+    every piece has data-m with its number, so the viewer treats them as one match."""
 
     def __init__(self, terms: list[Term], asset_url, chapter_dir: str):
         super().__init__(convert_charrefs=True)
@@ -178,8 +184,40 @@ class _Sanitizer(HTMLParser):
         self.marks = 0
         self._drop = 0
         self._open: list[str] = []
+        self._block: list[tuple[bool, str]] = []  # (is text, html or raw text) since the last block boundary
+
+    def _emit(self, markup: str) -> None:
+        self._block.append((False, markup))
+
+    def _flush(self) -> None:
+        """Mark the matches in the text gathered since the last block boundary, and output it."""
+        texts = [t for is_text, t in self._block if is_text]
+        spans = text_spans("".join(texts), self.terms) if self.terms and texts else []
+        offset = 0
+        for is_text, item in self._block:
+            if not is_text:
+                self.out.append(item)
+                continue
+            pos, end = 0, len(item)
+            for n, (start, stop) in enumerate(spans):
+                a, b = max(start - offset, 0), min(stop - offset, end)
+                if a >= b:
+                    continue
+                number = self.marks + n
+                whole = start - offset >= 0 and stop - offset <= end
+                attrs = f'id="m{number}"' if whole else (
+                    f'id="m{number}" data-m="{number}"' if start - offset >= 0 else f'data-m="{number}"')
+                self.out.append(html.escape(item[pos:a]))
+                self.out.append(f"<mark {attrs}>{html.escape(item[a:b])}</mark>")
+                pos = b
+            self.out.append(html.escape(item[pos:]))
+            offset += end
+        self.marks += len(spans)
+        self._block = []
 
     def handle_starttag(self, tag, attrs):
+        if tag in _BLOCK_TAGS:
+            self._flush()
         if tag in _DROP:
             self._drop += 1
             return
@@ -191,9 +229,13 @@ class _Sanitizer(HTMLParser):
             name = _resolve(self.chapter_dir, src)
             if posixpath.splitext(name)[1].lower() in IMAGE_TYPES and "://" not in src:
                 alt = html.escape(attrs.get("alt") or "", quote=True)
-                self.out.append(f'<img src="{html.escape(self.asset_url(name), quote=True)}" alt="{alt}" loading="lazy">')
+                # The size, when the book gives it, saves room for the picture before it
+                # loads, so the text below doesn't jump down after we've scrolled to a match.
+                size = "".join(f' {k}="{int(v)}"' for k in ("width", "height")
+                               if (v := (attrs.get(k) or "").strip().removesuffix("px")).isdigit() and 0 < int(v) < 100000)
+                self._emit(f'<img src="{html.escape(self.asset_url(name), quote=True)}" alt="{alt}"{size} loading="lazy">')
             return
-        self.out.append(f"<{tag}>")
+        self._emit(f"<{tag}>")
         if tag not in _VOID:
             self._open.append(tag)
 
@@ -205,6 +247,8 @@ class _Sanitizer(HTMLParser):
             self.handle_endtag(tag)
 
     def handle_endtag(self, tag):
+        if tag in _BLOCK_TAGS:
+            self._flush()
         if tag in _DROP:
             self._drop = max(0, self._drop - 1)
             return
@@ -212,20 +256,18 @@ class _Sanitizer(HTMLParser):
             return
         while self._open:
             open_tag = self._open.pop()
-            self.out.append(f"</{open_tag}>")
+            self._emit(f"</{open_tag}>")
             if open_tag == tag:
                 break
 
     def handle_data(self, data):
         if self._drop:
             return
-        pos = 0
-        for start, end in text_spans(data, self.terms) if self.terms else []:
-            self.out.append(html.escape(data[pos:start]))
-            self.out.append(f'<mark id="m{self.marks}">{html.escape(data[start:end])}</mark>')
-            self.marks += 1
-            pos = end
-        self.out.append(html.escape(data[pos:]))
+        self._block.append((True, data))
+
+    def close(self):
+        super().close()
+        self._flush()
 
     def result(self) -> str:
         return "".join(self.out) + "".join(f"</{t}>" for t in reversed(self._open))
