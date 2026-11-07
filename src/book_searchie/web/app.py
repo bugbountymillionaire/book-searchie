@@ -26,6 +26,7 @@ from ..search import QueryError, fill_snippets, matching_seqs, search
 from . import opener, render
 from .jobs import OcrBusy, OcrJob
 from .kb_pages import add_kb_pages, note_view
+from .entries_api import add_entries_routes
 from .notes_api import add_notes_routes, file_ids, open_notes_for
 
 HERE = Path(__file__).parent
@@ -149,6 +150,7 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
         return JSONResponse({"error": "That request isn't right. " + "; ".join(problems)}, status_code=422)
 
     add_notes_routes(app, config, open_db, _require_app_header)
+    add_entries_routes(app, config, open_db, _require_app_header)
     add_kb_pages(app, config, open_db, page)
 
     # --- Search ------------------------------------------------------------

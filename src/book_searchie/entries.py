@@ -677,6 +677,9 @@ class EntriesMixin:
             for r in self.conn.execute(f"SELECT id, title, updated FROM entries WHERE id IN ({marks})", ids)
         }
 
+    def entry_summary(self, entry_id: int) -> EntrySummary | None:
+        return self._summaries([entry_id]).get(entry_id)
+
     def entry_list(self, *, tag: str | None = None, topic: str | None = None) -> list[EntrySummary]:
         """Every entry A to Z, with its sub-headings, for the KB's left column. With a tag
         (or one of its other names), only entries with it; with a topic, only entries with
@@ -716,11 +719,21 @@ class EntriesMixin:
             f"{self._PIECE_SELECT} WHERE p.path = ? AND p.seq = ? ORDER BY p.created, p.id", (path, seq))
         return [self._piece(r) for r in rows]
 
-    def entry_tag_counts(self) -> list[tuple[str, int]]:
-        """Entry tags in use, A to Z, with how many entries have each."""
-        return [(r[0], r[1]) for r in self.conn.execute(
-            "SELECT t.name, COUNT(*) FROM tags t JOIN entry_tags et ON et.tag_id = t.id"
-            " GROUP BY t.id ORDER BY t.name COLLATE NOCASE")]
+    def entry_tag_counts(self, prefix: str = "", limit: int | None = None) -> list[tuple[str, int, list[str]]]:
+        """Entry tags in use, A to Z, with how many entries have each and their other names.
+        prefix is for autocomplete: it matches the start of a tag's name or of another name."""
+        sql = ("SELECT t.id, t.name, COUNT(*) FROM tags t JOIN entry_tags et ON et.tag_id = t.id"
+               " WHERE t.kind = ?")
+        params: list = [ENTRY_TAG_KIND]
+        if prefix.strip():
+            sql += (" AND (t.name LIKE ?2 ESCAPE '\\' OR EXISTS (SELECT 1 FROM tag_aliases a"
+                    " WHERE a.tag_id = t.id AND a.alias LIKE ?2 ESCAPE '\\'))")
+            params.append(_like_prefix(prefix))
+        sql += " GROUP BY t.id ORDER BY t.name COLLATE NOCASE"
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        return [(name, count, self.aliases_of(tag_id))
+                for tag_id, name, count in self.conn.execute(sql, params).fetchall()]
 
     def search_entries(self, query: str, *, topic: str | None = None, limit: int = 50, offset: int = 0,
                        mark: tuple[str, str] = ("[", "]")) -> tuple[list[EntryHit], int]:

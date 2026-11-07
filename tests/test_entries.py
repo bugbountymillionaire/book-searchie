@@ -235,8 +235,10 @@ def test_rename_entry_onto_another_merges_them(store):
 def test_entry_tags_work_with_tag_tidying(store):
     piece = store.add_piece("Feverfew", "Description", Piece(body="Daisy-like flowers."))
     assert store.set_entry_tags(piece.entry_id, ["Headache", " migraine "]) == ["Headache", "migraine"]
-    assert store.entry_tag_counts() == [("Headache", 1), ("migraine", 1)]
+    assert store.entry_tag_counts() == [("Headache", 1, []), ("migraine", 1, [])]
     store.add_alias("tag", "Headache", "Cephalalgia")
+    assert store.entry_tag_counts("ceph") == [("Headache", 1, ["Cephalalgia"])]
+    assert store.entry_tag_counts("mig_") == []
     assert store.search_entries("cephalalgia")[1] == 1
 
     # Merging two tags (the existing tag tidying) carries entry tags too.

@@ -58,8 +58,34 @@ def open_notes_for(config: Config, *, create: bool = True):
         store.close()
 
 
-def file_ids(db: Database, notes: list[Note]) -> dict[str, int]:
-    """Index ids of the books that book notes came from, by path, to link to the viewer."""
+def book_source(db: Database, config: Config, file_id: int, seq: int) -> dict:
+    """Where text saved from a book came from, taken from the index: path, seq, label, href,
+    topic and book_title. Raises a 400 if the book or page isn't there, so a request can't
+    point at an arbitrary file."""
+    row = db.get_file(file_id)
+    if row is None:
+        raise HTTPException(400, "That book isn't in the index any more.")
+    path = Path(row["path"]).resolve()
+    if not any(path.is_relative_to(root) for root in config.roots):
+        raise HTTPException(400, "That book isn't in the library.")
+    source = {"path": row["path"], "seq": seq, "topic": row["topic"], "book_title": row["title"],
+              "label": None, "href": None}
+    section = next((s for s in db.sections(file_id) if s["seq"] == seq), None)
+    if section is not None:
+        source.update(label=section["label"], href=section["href"])
+    elif row["kind"] == "pdf" and path.is_file():
+        # Pages without text (pictures, blank scans) aren't in the index, but text can still be saved.
+        try:
+            source["label"] = render.pdf_page(path, seq, []).label
+        except IndexError:
+            raise HTTPException(400, "That page isn't in this book.") from None
+    else:
+        raise HTTPException(400, "That page isn't in the index for this book.")
+    return source
+
+
+def file_ids(db: Database, notes) -> dict[str, int]:
+    """Index ids of the books that book notes or pieces came from, by path, to link to the viewer."""
     paths = {n.path for n in notes if n.path and not n.source_missing}
     if not paths:
         return {}
@@ -152,24 +178,8 @@ def add_notes_routes(
             return note
         if data.file_id is None or data.seq is None:
             raise HTTPException(400, "A book note needs the book and page it came from.")
-        row = db.get_file(data.file_id)
-        if row is None:
-            raise HTTPException(400, "That book isn't in the index any more.")
-        path = Path(row["path"]).resolve()
-        if not any(path.is_relative_to(root) for root in config.roots):
-            raise HTTPException(400, "That book isn't in the library.")
-        section = next((s for s in db.sections(data.file_id) if s["seq"] == data.seq), None)
-        if section is not None:
-            note.label, note.href = section["label"], section["href"]
-        elif row["kind"] == "pdf" and path.is_file():
-            # Pages without text (pictures, blank scans) aren't in the index, but can still have notes.
-            try:
-                note.label = render.pdf_page(path, data.seq, []).label
-            except IndexError:
-                raise HTTPException(400, "That page isn't in this book.") from None
-        else:
-            raise HTTPException(400, "That page isn't in the index for this book.")
-        note.path, note.seq, note.topic, note.book_title = row["path"], data.seq, row["topic"], row["title"]
+        for name, value in book_source(db, config, data.file_id, data.seq).items():
+            setattr(note, name, value)
         return note
 
     def save(store: NotesStore, db: Database, note: Note, note_id: int | None = None) -> dict:
