@@ -120,7 +120,7 @@ def cmd_notes_export(args) -> int:
     if args.per_tag and args.format != "md":
         print("error: --per-tag is for Markdown; add --format md", file=sys.stderr)
         return 2
-    with NotesStore.open(config.notes_path) as store:
+    with NotesStore.open(config.notes_path, config.headings) as store:
         count = store.count()
         if args.per_tag:
             if args.dest == "-":
@@ -159,7 +159,7 @@ def cmd_notes_import(args) -> int:
         print(f"error: {args.file} isn't a JSON backup ({e})", file=sys.stderr)
         return 2
     try:
-        with NotesStore.open(config.notes_path) as store:
+        with NotesStore.open(config.notes_path, config.headings) as store:
             had = store.count()
             restored = restore(store, data, replace=args.replace, notes_path=config.notes_path)
     except (RestoreError, NotesError) as e:

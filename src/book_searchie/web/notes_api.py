@@ -49,7 +49,7 @@ def open_notes_for(config: Config, *, create: bool = True):
         yield None
         return
     try:
-        store = NotesStore.open(config.notes_path)
+        store = NotesStore.open(config.notes_path, config.headings)
     except NotesError as e:
         raise HTTPException(503, str(e)) from None
     try:

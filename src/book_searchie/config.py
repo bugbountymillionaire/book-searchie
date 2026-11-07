@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .entries import DEFAULT_HEADINGS, HEADING_MAX
+
 CONFIG_NAME = "book-searchie.toml"
 ENV_PREFIX = "BOOK_SEARCHIE_"
 MODES = ("local", "network")
@@ -33,6 +35,9 @@ class Config:
     # Your notes (the KB). Unlike the index, this is your own work, so back it up.
     notes_path: Path = Path("book-searchie-notes.db")
     tag_kinds: list[str] = field(default_factory=lambda: list(DEFAULT_TAG_KINDS))
+    # Sub-headings for KB entries, in the order entries show them. The first is used when
+    # you don't pick one.
+    headings: list[str] = field(default_factory=lambda: list(DEFAULT_HEADINGS))
     mode: str = "local"
     host: str = "127.0.0.1"
     port: int = 8004
@@ -137,6 +142,18 @@ def _build(data: dict, base: Path, source: Path | None) -> Config:
     if len(set(tag_kinds)) != len(tag_kinds):
         raise ConfigError("[notes] tag_kinds lists the same kind twice")
 
+    headings = notes.get("headings", DEFAULT_HEADINGS)
+    if isinstance(headings, str):
+        headings = [headings]
+    headings = [" ".join(str(h).split()) for h in headings]
+    headings = [h for h in headings if h]
+    if not headings:
+        raise ConfigError('[notes] headings needs at least one sub-heading, e.g. ["Description"]')
+    if any(len(h) > HEADING_MAX for h in headings):
+        raise ConfigError(f"[notes] headings can each be at most {HEADING_MAX} characters")
+    if len({h.casefold() for h in headings}) != len(headings):
+        raise ConfigError("[notes] headings lists the same sub-heading twice")
+
     ai_enabled = ai.get("enabled", False)
     if not isinstance(ai_enabled, bool):
         raise ConfigError("[ai] enabled must be true or false")
@@ -169,6 +186,7 @@ def _build(data: dict, base: Path, source: Path | None) -> Config:
         index_path=(base / index.get("path", "book-searchie.db")).resolve(),
         notes_path=(base / notes.get("path", "book-searchie-notes.db")).resolve(),
         tag_kinds=tag_kinds,
+        headings=headings,
         mode=mode,
         host=server.get("host", "0.0.0.0" if mode == "network" else "127.0.0.1"),
         port=port,
@@ -210,6 +228,9 @@ path = "book-searchie.db"         # SQLite index file, relative to this config f
 [notes]
 path = "book-searchie-notes.db"   # your KB notes: your own work, so back this file up
 tag_kinds = ["subject", "use"]    # the kinds of tag you give notes, e.g. ["plant", "condition"]
+# Sub-headings for KB entries, in the order they're shown. The first is used when you don't
+# pick one, and you can always type a new one.
+headings = ["Description", "Identification", "Harvesting", "Tea", "Tincture", "Poultice", "Infused oil", "Cautions"]
 
 [ai]
 enabled = false                   # tag suggestions from a local model; needs Ollama (ollama.com)

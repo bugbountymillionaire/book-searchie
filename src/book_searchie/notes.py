@@ -23,6 +23,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .db import check_fts5
+from .entries import DEFAULT_HEADINGS, EntriesMixin, migrate_to_entries
 from .search import QueryError, prepare_query
 
 SOURCE_TYPES = ("book", "other", "own")
@@ -33,8 +34,8 @@ REF_MAX = 500  # source_ref and source_url
 TAG_MAX = 60
 DEFAULT_TITLE_WORDS = 8
 
-# Each entry upgrades the file from version i to i + 1. Only ever add to the end:
-# never edit or remove a migration that has been released.
+# Each entry upgrades the file from version i to i + 1: SQL, or a function given the store.
+# Only ever add to the end: never edit or remove a migration that has been released.
 _MIGRATIONS = [
     """
     CREATE TABLE notes (
@@ -92,6 +93,9 @@ _MIGRATIONS = [
     );
     CREATE INDEX tag_aliases_tag ON tag_aliases(tag_id);
     """,
+    # 3: entries (Nettle) with sub-headings and pieces of text, which replace notes. Notes are
+    # converted, and kept until the screens that use them are replaced. See entries.py.
+    migrate_to_entries,
 ]
 
 # bm25 weights for title, quote, body, source_ref, tags.
@@ -260,12 +264,14 @@ def _best_snippet(row: sqlite3.Row, mark_open: str) -> str:
     return row["quote_snippet"] or row["body_snippet"] or row["any_snippet"] or ""
 
 
-class NotesStore:
-    def __init__(self, conn: sqlite3.Connection):
+class NotesStore(EntriesMixin):
+    def __init__(self, conn: sqlite3.Connection, headings: list[str] | None = None):
         self.conn = conn
+        # The sub-headings entries use, in the order they're shown (from the config).
+        self.headings = list(headings) if headings else list(DEFAULT_HEADINGS)
 
     @classmethod
-    def open(cls, path: Path) -> NotesStore:
+    def open(cls, path: Path, headings: list[str] | None = None) -> NotesStore:
         check_fts5()
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(path, timeout=30)
@@ -273,7 +279,7 @@ class NotesStore:
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
-        store = cls(conn)
+        store = cls(conn, headings)
         try:
             store._migrate(path)
         except BaseException:
@@ -312,8 +318,19 @@ class NotesStore:
             finally:
                 backup.close()
         for i in range(version, target):
-            # executescript commits first, so run each migration in its own explicit transaction.
-            self.conn.executescript(f"BEGIN; {_MIGRATIONS[i]}; PRAGMA user_version = {i + 1}; COMMIT;")
+            migration = _MIGRATIONS[i]
+            if callable(migration):
+                self.conn.execute("BEGIN")
+                try:
+                    migration(self)
+                    self.conn.execute(f"PRAGMA user_version = {i + 1}")
+                    self.conn.commit()
+                except BaseException:
+                    self.conn.rollback()
+                    raise
+            else:
+                # executescript commits first, so run each migration in its own explicit transaction.
+                self.conn.executescript(f"BEGIN; {migration}; PRAGMA user_version = {i + 1}; COMMIT;")
 
     # --- writing ---
 
@@ -388,6 +405,10 @@ class NotesStore:
                 "INSERT OR IGNORE INTO note_tags (note_id, tag_id) SELECT note_id, ? FROM note_tags WHERE tag_id = ?",
                 (target, tag_id),
             )
+            self.conn.execute(
+                "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) SELECT entry_id, ? FROM entry_tags WHERE tag_id = ?",
+                (target, tag_id),
+            )
             self.conn.execute("UPDATE tag_aliases SET tag_id = ? WHERE tag_id = ?", (target, tag_id))
             self.conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
             self.conn.execute(
@@ -436,9 +457,10 @@ class NotesStore:
     # --- keeping book notes attached to their books (called by the indexer) ---
 
     def move_book(self, old_path: str, new_path: str, topic: str, book_title: str) -> int:
-        """A book was moved or renamed: its notes follow it. Returns how many notes moved."""
+        """A book was moved or renamed: its notes and pieces follow it. Returns how many notes moved."""
         with self.conn:
             # Not a change to the notes themselves, so `updated` stays as it was.
+            self._move_book_pieces(old_path, new_path, topic, book_title)
             return self.conn.execute(
                 "UPDATE notes SET path = ?, topic = ?, book_title = ?, source_missing = 0"
                 " WHERE source_type = 'book' AND path = ?",
@@ -450,7 +472,9 @@ class NotesStore:
         those whose book is back. Notes under an unavailable root (an unplugged drive) are
         left as they are. Returns how many notes are now missing their book."""
         roots = [Path(r) for r in unavailable_roots]
-        paths = [r[0] for r in self.conn.execute("SELECT DISTINCT path FROM notes WHERE source_type = 'book'")]
+        paths = [r[0] for r in self.conn.execute(
+            "SELECT path FROM notes WHERE source_type = 'book' UNION SELECT path FROM pieces WHERE source_type = 'book'"
+        )]
         with self.conn:
             for path in paths:
                 if path in present:
@@ -459,9 +483,11 @@ class NotesStore:
                     continue
                 else:
                     missing = 1
-                self.conn.execute(
-                    "UPDATE notes SET source_missing = ? WHERE source_type = 'book' AND path = ?", (missing, path)
-                )
+                for table in ("notes", "pieces"):
+                    self.conn.execute(
+                        f"UPDATE {table} SET source_missing = ? WHERE source_type = 'book' AND path = ?",
+                        (missing, path),
+                    )
         return self.missing_count()
 
     def missing_count(self) -> int:
@@ -491,12 +517,13 @@ class NotesStore:
         # Tags with aliases are kept, so the aliases aren't lost while no note has the tag.
         self.conn.execute(
             "DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM note_tags)"
-            " AND id NOT IN (SELECT tag_id FROM tag_aliases)"
+            " AND id NOT IN (SELECT tag_id FROM entry_tags) AND id NOT IN (SELECT tag_id FROM tag_aliases)"
         )
 
     def _reindex_tag(self, tag_id: int) -> None:
         for (note_id,) in self.conn.execute("SELECT note_id FROM note_tags WHERE tag_id = ?", (tag_id,)).fetchall():
             self._reindex(note_id)
+        self._reindex_entries_with_tag(tag_id)
 
     def _reindex(self, note_id: int) -> None:
         row = self.conn.execute(
