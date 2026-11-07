@@ -20,11 +20,15 @@
         <option value="{{ t.topic }}" {% if t.topic|lower == topic|lower %}selected{% endif %}>{{ t.topic }} ({{ t.books }})</option>
         {% endfor %}
       </select>
-      {# Unticked boxes send nothing; with neither, both are searched (see app.search_scope). #}
+      {# Unticked boxes send nothing; with none, everything is searched. scoped=1 says the
+         boxes were sent, so an unticked Researched books box counts (see app.search_scope). #}
       {% set sb = scope_books is not defined or scope_books %}{% set sk = scope_kb is not defined or scope_kb %}
+      {% set sd = scope_done is not defined or scope_done %}
+      <input type="hidden" name="scoped" value="1">
       <span class="scope" role="group" aria-label="Search in">
-        <label><input type="checkbox" name="books" value="1" {{ 'checked' if sb }}> Books</label>
+        <label title="Books you haven't marked as researched for this search"><input type="checkbox" name="books" value="1" {{ 'checked' if sb }}> Books</label>
         <label><input type="checkbox" name="kb" value="1" {{ 'checked' if sk }}> KB</label>
+        <label title="Books you've marked as researched for this search, shown in their own section"><input type="checkbox" name="done" value="1" {{ 'checked' if sd }}> Researched books</label>
       </span>
       <button type="submit">Search</button>
     </form>

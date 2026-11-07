@@ -1,4 +1,4 @@
-"""Searching books, the KB or both, with the Books and KB checkboxes (KB step 6)."""
+"""Searching books, the KB and researched books, with the checkboxes in the search box."""
 
 import sqlite3
 
@@ -7,8 +7,9 @@ from fastapi.testclient import TestClient
 
 from book_searchie.db import Database
 from book_searchie.indexer import run_index
-from book_searchie.notes import Note, NotesStore, Tag
-from book_searchie.web.app import create_app, search_scope
+from book_searchie.entries import Piece
+from book_searchie.notes import NotesStore
+from book_searchie.web.app import create_app, scope_params, search_scope
 
 
 @pytest.fixture
@@ -21,87 +22,114 @@ def client(config, db):
 def notes(config, db):
     culpeper = db.conn.execute("SELECT path FROM files WHERE title = 'Culpeper'").fetchone()[0]
     with NotesStore.open(config.notes_path) as store:
-        store.create(Note(source_type="book", topic="Herbalism", path=culpeper, seq=1, label="2", book_title="Culpeper",
-                          quote="The root of black cohosh is bitter.", tags=[Tag("subject", "Roots")]))
-        store.create(Note(source_type="other", topic="Herbalism", title="Cohosh lecture", source_ref="Herb school",
-                          body="Black cohosh <b>tincture</b> dose."))
-        store.create(Note(source_type="own", topic="Woodwork", title="Cohosh-stained oak", body="An odd idea."))
+        store.add_text("Black cohosh", "The root is bitter.",
+                       Piece(body="x", path=culpeper, seq=1, label="2", book_title="Culpeper", topic="Herbalism"))
+        store.add_text("Tinctures", "# Tincture\nBlack cohosh <b>tincture</b> dose.",
+                       Piece(body="x", source_ref="Herb school", topic="Herbalism"))
+        store.add_text("Oak", "Cohosh-stained oak: an odd idea.", Piece(body="x", topic="Woodwork"))
+        store.set_entry_tags(store.find_entry("Black cohosh").id, ["Hot flushes"])
         yield store
 
 
 def articles(page, cls):
-    return page.count(f'<article class="{cls}"')
+    return page.count(f'<article class="{cls}')
+
+
+def researched(client, db, title, q):
+    fid = db.conn.execute("SELECT id FROM files WHERE title = ?", (title,)).fetchone()[0]
+    client.put("/api/research", json={"file_id": fid, "q": q}, headers={"X-Book-Searchie": "1"})
 
 
 def test_search_scope_rules():
-    assert search_scope(None, None) == (True, True)  # old links and bookmarks search both
-    assert search_scope("1", "1") == (True, True)
-    assert search_scope("1", None) == (True, False)
-    assert search_scope(None, "1") == (False, True)
-    assert search_scope("0", "") == (True, True)  # at least one is always searched
+    # Old links and bookmarks, without scoped=1: researched books go along with Books.
+    assert search_scope(None, None) == (True, True, True)
+    assert search_scope("1", "1") == (True, True, True)
+    assert search_scope("1", None) == (True, False, True)
+    assert search_scope(None, "1") == (False, True, False)
+    assert search_scope("0", "") == (True, True, True)  # something is always searched
+    # From the search box (scoped=1), each box counts.
+    assert search_scope("1", "1", None, "1") == (True, True, False)
+    assert search_scope(None, None, "1", "1") == (False, False, True)
+    assert search_scope(None, None, None, "1") == (True, True, True)
+    assert scope_params(True, True, True) == {"books": "1", "kb": "1"}
+    assert scope_params(True, False, False) == {"books": "1", "scoped": "1"}
+    assert scope_params(False, True, True) == {"kb": "1", "done": "1", "scoped": "1"}
+    for b in (True, False):
+        for k in (True, False):
+            for d in (True, False):
+                if b or k or d:
+                    p = scope_params(b, k, d)
+                    assert search_scope(p.get("books"), p.get("kb"), p.get("done"), p.get("scoped")) == (b, k, d)
 
 
 def test_checkboxes_in_the_search_box(client):
     page = client.get("/").text
     assert '<input type="checkbox" name="books" value="1" checked> Books' in page
     assert '<input type="checkbox" name="kb" value="1" checked> KB' in page
+    assert '<input type="checkbox" name="done" value="1" checked> Researched books' in page
+    assert '<input type="hidden" name="scoped" value="1">' in page
     assert "/static/scope.js" in page
-    page = client.get("/", params={"q": "cohosh", "kb": "1"}).text
+    page = client.get("/", params={"q": "cohosh", "kb": "1", "scoped": "1"}).text
     assert 'name="books" value="1" >' in page and 'name="kb" value="1" checked>' in page  # shows what was searched
+    assert 'name="done" value="1" >' in page
 
 
-def test_both_shows_notes_above_books(client, notes):
-    page = client.get("/", params={"q": "cohosh", "books": "1", "kb": "1"}).text
-    assert 'Your notes <span class="dim">(3)</span>' in page
-    assert articles(page, "note-hit") == 3 and articles(page, "book") == 1
-    assert page.index("Your notes") < page.index('<article class="book">')
-    assert "All 3 matching notes" not in page  # all of them are already shown
-    assert "Black <mark>cohosh</mark> &lt;b&gt;tincture&lt;/b&gt; dose." in page  # snippets are escaped
-
-
-def test_both_links_to_all_notes_when_there_are_more(client, notes):
-    for n in range(3):
-        notes.create(Note(source_type="own", topic="Herbalism", title=f"More cohosh {n}", body="x"))
+def test_both_shows_entries_above_books(client, notes):
     page = client.get("/", params={"q": "cohosh"}).text
-    assert articles(page, "note-hit") == 3
-    assert 'href="/?q=cohosh&amp;topic=&amp;kb=1">All 6 matching notes' in page
+    assert 'Your KB <span class="dim">(3)</span>' in page
+    assert articles(page, "entry-hit") == 3 and articles(page, "book") == 1
+    assert page.index("Your KB") < page.index('<article class="book')
+    assert page.index(">Black cohosh</a>") < page.index(">Tinctures</a>")  # a title match first
+    assert "All 3 matching entries" not in page  # all of them are already shown
+    assert "Black <mark>cohosh</mark> &lt;b&gt;tincture&lt;/b&gt; dose." in page  # snippets are escaped
+    tinctures = notes.find_entry("Tinctures").id
+    assert f'href="/kb/entry/{tinctures}?q=cohosh#h-tincture">Tincture</a>' in page
+    assert '<a class="tag" href="/kb?tag=Hot+flushes">Hot flushes</a>' in page
+
+
+def test_both_links_to_all_entries_when_there_are_more(client, notes):
+    for n in range(3):
+        notes.add_text(f"More cohosh {n}", "x")
+    page = client.get("/", params={"q": "cohosh"}).text
+    assert articles(page, "entry-hit") == 3
+    assert 'href="/?q=cohosh&amp;topic=&amp;kb=1">All 6 matching entries' in page
 
 
 def test_kb_only(client, notes):
     page = client.get("/", params={"q": "cohosh", "kb": "1"}).text
-    assert "3 matching notes in your KB" in page
-    assert articles(page, "note-hit") == 3 and articles(page, "book") == 0
-    assert '<span class="source-badge other">Other source</span>' in page
+    assert "3 matching entries in your KB" in page
+    assert articles(page, "entry-hit") == 3 and articles(page, "book") == 0
 
 
 def test_kb_only_pages(client, notes, monkeypatch):
     from book_searchie.web import app as app_module
 
-    monkeypatch.setattr(app_module, "NOTES_PER_PAGE", 2)
+    monkeypatch.setattr(app_module, "KB_PER_PAGE", 2)
     page = client.get("/", params={"q": "cohosh", "kb": "1"}).text
-    assert articles(page, "note-hit") == 2 and "Page 1 of 2" in page
+    assert articles(page, "entry-hit") == 2 and "Page 1 of 2" in page
     assert 'href="/?q=cohosh&amp;topic=&amp;kb=1&amp;page_no=2"' in page
-    assert articles(client.get("/", params={"q": "cohosh", "kb": "1", "page_no": 2}).text, "note-hit") == 1
+    assert articles(client.get("/", params={"q": "cohosh", "kb": "1", "page_no": 2}).text, "entry-hit") == 1
+    assert articles(client.get("/", params={"q": "cohosh", "kb": "1", "page_no": 9}).text, "entry-hit") == 1
 
 
-def test_books_only_is_as_before(client, notes):
+def test_books_only(client, notes):
     page = client.get("/", params={"q": "cohosh", "books": "1"}).text
-    assert "Your notes" not in page and articles(page, "note-hit") == 0 and articles(page, "book") == 1
+    assert "Your KB" not in page and articles(page, "entry-hit") == 0 and articles(page, "book") == 1
 
 
-def test_topic_filter_applies_to_notes(client, notes):
+def test_topic_filter_applies_to_entries(client, notes):
     page = client.get("/", params={"q": "cohosh", "topic": "Woodwork"}).text
-    assert 'Your notes <span class="dim">(1)</span>' in page and "Cohosh-stained oak" in page
+    assert 'Your KB <span class="dim">(1)</span>' in page and ">Oak</a>" in page
     assert "No results for <strong>cohosh</strong> in your books in Woodwork" in page
     page = client.get("/", params={"q": "cohosh", "topic": "Gardening", "kb": "1"}).text
-    assert "No notes in your KB match" in page
+    assert "Nothing in your KB matches" in page
     assert 'href="/?q=cohosh&amp;kb=1">Search all topics' in page
 
 
 def test_no_notes_file_yet(client, config):
     page = client.get("/", params={"q": "cohosh"}).text
-    assert "Your notes" not in page and articles(page, "book") == 1
-    assert "No notes in your KB match" in client.get("/", params={"q": "cohosh", "kb": "1"}).text
+    assert "Your KB" not in page and articles(page, "book") == 1
+    assert "Nothing in your KB matches" in client.get("/", params={"q": "cohosh", "kb": "1"}).text
     assert not config.notes_path.exists()
 
 
@@ -110,8 +138,35 @@ def test_bad_query_in_kb_only(client, notes):
     assert "understand that search" in page
 
 
-def test_home_counts_notes(client, notes):
-    assert "Search 5 books and 3 notes" in client.get("/").text
+def test_home_counts_entries(client, notes):
+    assert "Search 5 books and 3 KB entries" in client.get("/").text
+
+
+def test_researched_books_in_their_own_section(client, db):
+    researched(client, db, "Culpeper", "root")
+    page = client.get("/", params={"q": "root"}).text
+    assert "1 of 2 books researched for “root”" in page
+    assert page.index('<article class="book">') < page.index("Researched for “root”</h2>") \
+        < page.index('<article class="book researched">')
+    assert page.index("Modern Herbal</a>") < page.index("Culpeper</a>")  # not yet researched first
+
+
+def test_leaving_out_researched_books(client, db):
+    researched(client, db, "Culpeper", "root")
+    page = client.get("/", params={"q": "root", "books": "1", "kb": "1", "scoped": "1"}).text
+    assert articles(page, "book") == 1 and "Modern Herbal</a>" in page and "Culpeper</a>" not in page
+    assert "1 researched book not shown" in page
+    assert 'href="/?q=root&amp;topic=&amp;books=1&amp;kb=1">Show it' in page
+
+    only_done = client.get("/", params={"q": "root", "done": "1", "scoped": "1"}).text
+    assert articles(only_done, "book") == 1 and "Culpeper</a>" in only_done and "Modern Herbal</a>" not in only_done
+    assert "Researched for “root”</h2>" in only_done
+
+    researched(client, db, "Modern Herbal", "root")
+    page = client.get("/", params={"q": "root", "books": "1", "scoped": "1"}).text
+    assert "All 2 books with <strong>root</strong> in are researched for “root”" in page
+    page = client.get("/", params={"q": "valerian", "done": "1", "scoped": "1"}).text
+    assert "You haven't marked any of the 1 book with <strong>valerian</strong> as researched yet." in page
 
 
 def test_history_records_the_scope(client, db, notes):
@@ -125,7 +180,7 @@ def test_history_records_the_scope(client, db, notes):
     assert 'href="/?q=cohosh&amp;topic=&amp;books=1">cohosh</a>' in home
     assert 'href="/?q=cohosh&amp;topic=&amp;kb=1">cohosh</a>' in home
     assert 'href="/?q=cohosh&amp;topic=&amp;books=1&amp;kb=1">cohosh</a>' in home
-    assert "1 page, 3 notes" in home and ">KB</span>" in home and ">Books</span>" in home
+    assert "1 page, 3 entries" in home and ">KB</span>" in home and ">Books</span>" in home
 
 
 def test_old_history_is_kept_when_scope_is_added(config):

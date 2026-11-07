@@ -116,11 +116,11 @@ def test_viewer_button(client, db, config):
 
 def test_search_results_show_progress(client, db):
     page = client.get("/", params={"q": "root"}).text
-    assert "researched for" not in page and "✓ Researched</span>" not in page
+    assert "books researched for" not in page and "✓ Researched</span>" not in page
     client.put("/api/research", json={"file_id": book(db, "Culpeper")["id"], "q": "ROOT"}, headers=H)
     page = client.get("/", params={"q": "root"}).text
     assert "1 of 2 books researched for “root”" in page
     assert page.count("✓ Researched</span>") == 1
     culpeper = page.split("Culpeper</a></h2>")[1].split("</header>")[0]
     assert "✓ Researched" in culpeper
-    assert "researched for" not in client.get("/", params={"q": "valerian"}).text  # another term
+    assert "books researched for" not in client.get("/", params={"q": "valerian"}).text  # another term

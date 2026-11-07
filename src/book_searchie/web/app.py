@@ -26,15 +26,15 @@ from ..research import ResearchInvalid, research_term
 from ..search import QueryError, fill_snippets, matching_seqs, search
 from . import opener, render
 from .jobs import OcrBusy, OcrJob
-from .kb_pages import add_kb_pages, note_view
+from .kb_pages import add_kb_pages, heading_id
 from .entries_api import add_entries_routes
 from .notes_api import add_notes_routes, file_ids, open_notes_for
 from .research_api import add_research_routes
 
 HERE = Path(__file__).parent
 BOOKS_PER_PAGE = 10
-NOTES_PER_PAGE = 20  # searching the KB only
-NOTES_ABOVE_BOOKS = 3  # searching both: the best few notes, above the book results
+KB_PER_PAGE = 20  # searching the KB only
+KB_ABOVE_BOOKS = 3  # searching both: the best few entries, above the book results
 MAX_HITS = 1000
 PAGE_DPI = 150
 BOOK_SUFFIXES = {".pdf", ".epub"}
@@ -159,63 +159,74 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
     # --- Search ------------------------------------------------------------
 
     @app.get("/", response_class=HTMLResponse)
-    def home(request: Request, q: str = "", topic: str = "", page_no: int = 1,
-             books: str | None = None, kb: str | None = None):
+    def home(request: Request, q: str = "", topic: str = "", page_no: int = 1, books: str | None = None,
+             kb: str | None = None, done: str | None = None, scoped: str | None = None):
         q = q.strip()
-        want_books, want_kb = search_scope(books, kb)
-        scope = {"scope_books": want_books, "scope_kb": want_kb}
+        want_books, want_kb, want_done = search_scope(books, kb, done, scoped)
+        scope = {"scope_books": want_books, "scope_kb": want_kb, "scope_done": want_done}
+        any_books = want_books or want_done
         with open_db() as db, open_notes_for(config, create=False) as store:
             if not q:
                 history = [
                     {"row": h, "found": history_found(h),
                      "url": "/?" + urlencode({"q": h["query"], "topic": h["topic"],
-                                              **scope_params(h["scope"] != "kb", h["scope"] != "books")})}
+                                              **scope_params(h["scope"] != "kb", h["scope"] != "books", h["scope"] != "kb")})}
                     for h in db.recent_searches()
                 ]
                 return page(request, "search.html", db, topic=topic, stats=db.stats(), history=history,
-                            note_count=store.count() if store else 0, **scope)
+                            entry_count=store.entry_count() if store else 0, **scope)
             try:
-                note_total, note_cards, note_pages = 0, [], 1
+                kb_total, kb_found, kb_pages = 0, [], 1
                 if want_kb and store:
-                    note_total = store.search_count(q, topic=topic or None)
-                    if want_books:  # a few above the book results
-                        found = store.search(q, topic=topic or None, limit=NOTES_ABOVE_BOOKS, mark=(MARK_OPEN, MARK_CLOSE))
+                    if any_books:  # the best few entries, above the books
+                        kb_found, kb_total = store.search_entries(
+                            q, topic=topic or None, limit=KB_ABOVE_BOOKS, mark=(MARK_OPEN, MARK_CLOSE))
                     else:
-                        note_pages = max(1, -(-note_total // NOTES_PER_PAGE))
-                        page_no = min(max(1, page_no), note_pages)
-                        found = store.search(q, topic=topic or None, limit=NOTES_PER_PAGE,
-                                             offset=(page_no - 1) * NOTES_PER_PAGE, mark=(MARK_OPEN, MARK_CLOSE))
-                    ids = file_ids(db, [h.note for h in found])
-                    note_cards = [{**note_view(h.note, ids), "snippet": h.snippet} for h in found]
-                hits = search(db, q, topic=topic or None, limit=MAX_HITS, with_snippets=False) if want_books else []
+                        page_no = max(1, page_no)
+                        kb_found, kb_total = store.search_entries(
+                            q, topic=topic or None, limit=KB_PER_PAGE, offset=(page_no - 1) * KB_PER_PAGE,
+                            mark=(MARK_OPEN, MARK_CLOSE))
+                        kb_pages = max(1, -(-kb_total // KB_PER_PAGE))
+                        if page_no > kb_pages:  # past the end: show the last page
+                            page_no = kb_pages
+                            kb_found, _ = store.search_entries(
+                                q, topic=topic or None, limit=KB_PER_PAGE, offset=(page_no - 1) * KB_PER_PAGE,
+                                mark=(MARK_OPEN, MARK_CLOSE))
+                hits = search(db, q, topic=topic or None, limit=MAX_HITS, with_snippets=False) if any_books else []
             except QueryError as e:
                 return page(request, "search.html", db, q=q, topic=topic, error=str(e), **scope)
             if page_no == 1:  # not again for each page of the same results
-                db.record_search(q, topic, len(hits), "both" if want_books and want_kb else "books" if want_books else "kb",
-                                 notes=note_total if want_kb else None)
+                db.record_search(q, topic, len(hits), "both" if any_books and want_kb else "books" if any_books else "kb",
+                                 notes=kb_total if want_kb else None)
             books_found: dict[int, dict] = {}
             for hit in hits:
                 books_found.setdefault(hit.file_id, {"hit": hit, "hits": []})["hits"].append(hit)
-            book_list = list(books_found.values())
-            done_paths = store.researched_paths(q) if store and book_list else set()
-            for b in book_list:
+            done_paths = store.researched_paths(q) if store and books_found else set()
+            fresh, researched = [], []
+            for b in books_found.values():
                 b["researched"] = b["hit"].path in done_paths
-            researched_count = sum(b["researched"] for b in book_list)
-            pages = note_pages if not want_books else max(1, -(-len(book_list) // BOOKS_PER_PAGE))
+                (researched if b["researched"] else fresh).append(b)
+            # Books not yet researched for this search, then those that are, in their own section.
+            book_list = (fresh if want_books else []) + (researched if want_done else [])
+            pages = kb_pages if not any_books else max(1, -(-len(book_list) // BOOKS_PER_PAGE))
             page_no = min(max(1, page_no), pages)
             shown = book_list[(page_no - 1) * BOOKS_PER_PAGE : page_no * BOOKS_PER_PAGE]
             # Only the first few hits of each book on this page are displayed; snippet just those.
             fill_snippets(db, q, [h for b in shown for h in b["hits"][:3]], mark=(MARK_OPEN, MARK_CLOSE))
             terms = query_terms(q)
             shown = [{**b, "hits": [_hit_view(h, terms) for h in b["hits"][:3]], "count": len(b["hits"])} for b in shown]
-            params = scope_params(want_books, want_kb)
+            params = scope_params(want_books, want_kb, want_done)
             return page(
                 request, "search.html", db, q=q, topic=topic, books=shown, book_count=len(book_list),
-                hit_count=len(hits), capped=len(hits) == MAX_HITS, page_no=page_no, pages=pages,
-                notes=note_cards, note_total=note_total, **scope,
-                researched_count=researched_count, research_term=" ".join(q.split()).casefold(),
-                all_notes_url="/?" + urlencode({"q": q, "topic": topic, "kb": "1"}),
+                hit_count=sum(len(b["hits"]) for b in book_list), capped=len(hits) == MAX_HITS,
+                page_no=page_no, pages=pages, kb_hits=[entry_hit_view(h, q) for h in kb_found], kb_total=kb_total,
+                found_count=len(books_found), researched_count=len(researched),
+                hidden_fresh=0 if want_books else len(fresh), hidden_done=0 if want_done else len(researched),
+                research_term=" ".join(q.split()).casefold(), **scope,
+                all_kb_url="/?" + urlencode({"q": q, "topic": topic, **scope_params(False, True, False)}),
                 all_topics_url="/?" + urlencode({"q": q, **params}),
+                with_done_url="/?" + urlencode({"q": q, "topic": topic, **scope_params(want_books, want_kb, True)}),
+                with_fresh_url="/?" + urlencode({"q": q, "topic": topic, **scope_params(True, want_kb, want_done)}),
                 page_url=lambda n: "/?" + urlencode({"q": q, "topic": topic, **params, "page_no": n}),
             )
 
@@ -408,30 +419,51 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
 
 
 def history_found(h) -> str:
-    """What a past search found: "12 pages, 3 notes", "no results"..."""
+    """What a past search found: "12 pages, 3 entries", "no results"..."""
     parts = []
     if h["scope"] != "kb" and h["hits"]:
         parts.append(f"{h['hits']}{'+' if h['hits'] >= MAX_HITS else ''} page{'s' if h['hits'] != 1 else ''}")
     if h["scope"] != "books" and h["notes"]:
-        parts.append(f"{h['notes']} note{'s' if h['notes'] != 1 else ''}")
+        parts.append(f"{h['notes']} entr{'ies' if h['notes'] != 1 else 'y'}")
     return ", ".join(parts) or "no results"
 
 
-def search_scope(books: str | None, kb: str | None) -> tuple[bool, bool]:
-    """What to search, from the Books and KB checkboxes: (books, kb).
+def entry_hit_view(hit, q: str) -> dict:
+    """A KB entry found by a search, for the results page: links open it with the words marked."""
+    url = f"/kb/entry/{hit.entry.id}?" + urlencode({"q": q})
+    return {
+        "entry": hit.entry, "url": url, "title_match": hit.title_match,
+        "found_in": [{"heading": s.heading, "url": f"{url}#{heading_id(s.heading)}", "snippet": s.snippet}
+                     for s in hit.sections],
+    }
 
-    A link with neither (an old bookmark, a topic link) searches both, and so does
-    unticking both, as at least one has to be searched.
+
+def search_scope(books: str | None, kb: str | None, done: str | None = None,
+                 scoped: str | None = None) -> tuple[bool, bool, bool]:
+    """What to search, from the Books, KB and Researched books checkboxes: (books, kb, done).
+    Books are those not yet researched for the search; done are those that are.
+
+    The search box sends scoped=1, so an unticked Researched books box means "leave them
+    out". A link without it (an old bookmark, the history) takes researched books along
+    with Books, as before there were any. A link with none ticked (a topic link) searches
+    everything, and so does unticking everything, as something has to be searched.
     """
-    want_books, want_kb = books == "1", kb == "1"
-    if not want_books and not want_kb:
-        return True, True
-    return want_books, want_kb
+    want_books, want_kb, want_done = books == "1", kb == "1", done == "1"
+    if scoped != "1":
+        want_done = want_books
+    if not (want_books or want_kb or want_done):
+        return True, True, True
+    return want_books, want_kb, want_done
 
 
-def scope_params(want_books: bool, want_kb: bool) -> dict[str, str]:
+def scope_params(want_books: bool, want_kb: bool, want_done: bool | None = None) -> dict[str, str]:
     """The query string parameters for a search scope."""
-    return {**({"books": "1"} if want_books else {}), **({"kb": "1"} if want_kb else {})}
+    if want_done is None:
+        want_done = want_books
+    params = {**({"books": "1"} if want_books else {}), **({"kb": "1"} if want_kb else {})}
+    if want_done != want_books:  # otherwise researched books go with Books, as a link without them does
+        params.update({"done": "1"} if want_done else {}, scoped="1")
+    return params
 
 
 def _static_fingerprint() -> str:

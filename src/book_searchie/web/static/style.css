@@ -516,3 +516,16 @@ a.note-tag:hover { text-decoration: none; outline: 1px solid var(--accent); }
   .kb-side[open] { padding-bottom: 10px; }
   .kb-piece-actions { opacity: 1; }
 }
+
+/* Search results: KB entries, and books researched for the search */
+.entry-hits .entry-hit { padding: 10px 0; border-top: 1px solid var(--line); }
+.entry-hits .entry-hit:first-child { border-top: 0; padding-top: 2px; }
+.entry-hit h3 { margin: 0 0 2px; font: 600 1.1rem/1.3 var(--serif); }
+.entry-hit h3 a { color: var(--text); }
+.entry-found { list-style: none; padding: 0; margin: 2px 0 4px; }
+.entry-found li { margin: 3px 0; }
+.entry-found .snippet { font-family: var(--serif); }
+.entry-hit .meta { margin-top: 4px; }
+.kb-results .entry-hit .tag { background: var(--surface); }
+.researched-head { margin-top: 28px; color: var(--ok); }
+.book.researched { border-left: 4px solid var(--ok); }

@@ -1,5 +1,24 @@
 {% extends "base.html" %}
-{% from "_note_card.html" import note_hit %}
+{% macro entry_hit(e) %}
+<article class="entry-hit">
+  <h3><a href="{{ e.url }}">{{ e.entry.title }}</a>{% if e.entry.aliases %} <span class="dim small">also {{ e.entry.aliases|join(', ') }}</span>{% endif %}</h3>
+  {% if e.found_in %}
+  <ul class="entry-found">
+    {% for f in e.found_in %}<li><a class="where" href="{{ f.url }}">{{ f.heading }}</a> <span class="snippet">{{ f.snippet|marked }}</span></li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% if e.entry.tags %}<div class="meta">{% for t in e.entry.tags %}<a class="tag" href="/kb?{{ {'tag': t}|urlencode }}">{{ t }}</a>{% endfor %}</div>{% endif %}
+</article>
+{% endmacro %}
+{% macro pager() %}
+{% if pages > 1 %}
+<nav class="pager">
+  {% if page_no > 1 %}<a href="{{ page_url(page_no - 1) }}">← Previous</a>{% endif %}
+  <span>Page {{ page_no }} of {{ pages }}</span>
+  {% if page_no < pages %}<a href="{{ page_url(page_no + 1) }}">Next →</a>{% endif %}
+</nav>
+{% endif %}
+{% endmacro %}
 {% set autofocus = not q %}
 {% block title %}{% if q %}{{ q }} · {% endif %}Book-Searchie{% endblock %}
 {% block content %}
@@ -7,7 +26,7 @@
   <div class="notice error">{{ error }}</div>
 {% elif not q %}
   <section class="welcome">
-    <h1>Search {{ stats.books }} books{% if note_count %} and {{ note_count }} note{{ 's' if note_count != 1 }}{% endif %}</h1>
+    <h1>Search {{ stats.books }} books{% if entry_count %} and {{ entry_count }} KB entr{{ 'ies' if entry_count != 1 else 'y' }}{% endif %}</h1>
     <p>Type a word or phrase above. Results open at the page where they were found, with your search terms highlighted.</p>
     {% if history %}
     <section class="history" id="history">
@@ -21,7 +40,7 @@
         <li data-id="{{ h.id }}">
           <a href="{{ item.url }}">{{ h.query }}</a>
           {% if h.topic %}<span class="tag">{{ h.topic }}</span>{% endif %}
-          {% if h.scope != 'both' %}<span class="tag kind" title="Searched {{ 'your books only' if h.scope == 'books' else 'your KB notes only' }}">{{ 'Books' if h.scope == 'books' else 'KB' }}</span>{% endif %}
+          {% if h.scope != 'both' %}<span class="tag kind" title="Searched {{ 'your books only' if h.scope == 'books' else 'your KB only' }}">{{ 'Books' if h.scope == 'books' else 'KB' }}</span>{% endif %}
           <span class="dim">
             {{ item.found }} · {{ h.searched_at|ago }}
           </span>
@@ -44,49 +63,60 @@
       {% endfor %}
     </div>
   </section>
-{% elif scope_kb and not scope_books %}
+{% elif scope_kb and not scope_books and not scope_done %}
   {# KB only #}
-  {% if notes %}
-  <p class="result-summary">{{ note_total }} matching note{{ 's' if note_total != 1 }} in your KB{% if topic %} in <strong>{{ topic }}</strong>{% endif %}</p>
-  <div class="note-hits">{% for card in notes %}{{ note_hit(card) }}{% endfor %}</div>
-  {% if pages > 1 %}
-  <nav class="pager">
-    {% if page_no > 1 %}<a href="{{ page_url(page_no - 1) }}">← Previous</a>{% endif %}
-    <span>Page {{ page_no }} of {{ pages }}</span>
-    {% if page_no < pages %}<a href="{{ page_url(page_no + 1) }}">Next →</a>{% endif %}
-  </nav>
-  {% endif %}
+  {% if kb_hits %}
+  <p class="result-summary">{{ kb_total }} matching entr{{ 'ies' if kb_total != 1 else 'y' }} in your KB{% if topic %} in <strong>{{ topic }}</strong>{% endif %}</p>
+  <div class="entry-hits">{% for e in kb_hits %}{{ entry_hit(e) }}{% endfor %}</div>
+  {{ pager() }}
   {% else %}
-  <div class="notice">No notes in your KB match <strong>{{ q }}</strong>{% if topic %} in {{ topic }}{% endif %}.
+  <div class="notice">Nothing in your KB matches <strong>{{ q }}</strong>{% if topic %} in {{ topic }}{% endif %}.
     {% if topic %}<a href="{{ all_topics_url }}">Search all topics</a>.{% endif %}</div>
   {% endif %}
 {% else %}
-  {% if notes %}
+  {% if kb_hits %}
   <section class="kb-results" aria-labelledby="kb-results-head">
-    <h2 id="kb-results-head">Your notes <span class="dim">({{ note_total }})</span></h2>
-    <div class="note-hits">{% for card in notes %}{{ note_hit(card) }}{% endfor %}</div>
-    {% if note_total > notes|length %}<a class="more" href="{{ all_notes_url }}">All {{ note_total }} matching notes →</a>{% endif %}
+    <h2 id="kb-results-head">Your KB <span class="dim">({{ kb_total }})</span></h2>
+    <div class="entry-hits">{% for e in kb_hits %}{{ entry_hit(e) }}{% endfor %}</div>
+    {% if kb_total > kb_hits|length %}<a class="more" href="{{ all_kb_url }}">All {{ kb_total }} matching entries →</a>{% endif %}
   </section>
   {% endif %}
+  {% set term %}“{{ research_term }}”{% endset %}
   {% if not books %}
-  <div class="notice">No results for <strong>{{ q }}</strong> in your books{% if topic %} in {{ topic }}{% endif %}.
-    {% if topic %}<a href="{{ all_topics_url }}">Search all topics</a>.{% endif %}</div>
+  <div class="notice">
+    {% if hidden_done %}
+    {{ 'The book' if hidden_done == 1 else 'All ' ~ hidden_done ~ ' books' }} with <strong>{{ q }}</strong> in {{ 'is' if hidden_done == 1 else 'are' }} researched for {{ term }}.
+    <a href="{{ with_done_url }}">Show {{ 'it' if hidden_done == 1 else 'them' }}</a>.
+    {% elif hidden_fresh %}
+    You haven't marked any of the {{ hidden_fresh }} book{{ 's' if hidden_fresh != 1 }} with <strong>{{ q }}</strong> as researched yet.
+    <a href="{{ with_fresh_url }}">Show {{ 'it' if hidden_fresh == 1 else 'them' }}</a>.
+    {% else %}
+    No results for <strong>{{ q }}</strong> in your books{% if topic %} in {{ topic }}{% endif %}.
+    {% if topic %}<a href="{{ all_topics_url }}">Search all topics</a>.{% endif %}
+    {% endif %}
+  </div>
   {% else %}
-  {% if notes %}<h2 class="books-head">Books</h2>{% endif %}
+  {% if kb_hits %}<h2 class="books-head">Books</h2>{% endif %}
   <p class="result-summary">
     {{ hit_count }}{% if capped %}+{% endif %} matching page{{ 's' if hit_count != 1 }} in {{ book_count }}{% if capped %}+{% endif %} book{{ 's' if book_count != 1 }}{% if topic %} in <strong>{{ topic }}</strong>{% endif %}
-    {% if researched_count %}<br><span class="research-progress">{{ researched_count }} of {{ book_count }} book{{ 's' if book_count != 1 }} researched for “{{ research_term }}”</span>{% endif %}
+    {% if researched_count %}<br><span class="research-progress">{{ researched_count }} of {{ found_count }} book{{ 's' if found_count != 1 }} researched for {{ term }}</span>{% endif %}
+    {% if hidden_done %}<br><span class="dim">{{ hidden_done }} researched book{{ 's' if hidden_done != 1 }} not shown. <a href="{{ with_done_url }}">Show {{ 'it' if hidden_done == 1 else 'them' }}</a></span>{% endif %}
   </p>
+  {% set ns = namespace(done_head=false) %}
   {% for b in books %}
+  {% if b.researched and not ns.done_head %}
+  {% set ns.done_head = true %}
+  <h2 class="books-head researched-head">Researched for {{ term }}</h2>
+  {% endif %}
   {% set first = b.hit %}
-  <article class="book">
+  <article class="book{{ ' researched' if b.researched }}">
     <header>
       <h2><a href="/view/{{ first.file_id }}/{{ first.seq }}?{{ {'q': q}|urlencode }}">{{ first.title }}</a></h2>
       <div class="meta">
         <span class="tag">{{ first.topic }}</span>
         <span class="tag kind">{{ first.kind|upper }}</span>
         {% if first.ocr %}<span class="tag ocr" title="Text read by OCR, so there may be small mistakes">OCR</span>{% endif %}
-        {% if b.researched %}<span class="tag researched" title="You marked this book as researched for “{{ research_term }}”">✓ Researched</span>{% endif %}
+        {% if b.researched %}<span class="tag researched" title="You marked this book as researched for {{ term }}">✓ Researched</span>{% endif %}
         <span>{{ b.count }}{% if capped and b.count > 1 %}+{% endif %} match{{ 'es' if b.count != 1 }}</span>
       </div>
     </header>
@@ -103,13 +133,7 @@
     {% endif %}
   </article>
   {% endfor %}
-  {% if pages > 1 %}
-  <nav class="pager">
-    {% if page_no > 1 %}<a href="{{ page_url(page_no - 1) }}">← Previous</a>{% endif %}
-    <span>Page {{ page_no }} of {{ pages }}</span>
-    {% if page_no < pages %}<a href="{{ page_url(page_no + 1) }}">Next →</a>{% endif %}
-  </nav>
-  {% endif %}
+  {{ pager() }}
   {% endif %}
 {% endif %}
 {% endblock %}
