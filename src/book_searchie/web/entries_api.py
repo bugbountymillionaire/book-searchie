@@ -71,6 +71,15 @@ class HeadingRenameIn(BaseModel):
     new_heading: str
 
 
+class HeadingOrderIn(BaseModel):
+    names: list[str]
+
+
+class HeadingNameIn(BaseModel):
+    name: str
+    new_name: str
+
+
 def snippet_html(snippet: str) -> str:
     return escape(snippet).replace(_OPEN, "<mark>").replace(_CLOSE, "</mark>")
 
@@ -307,3 +316,30 @@ def add_entries_routes(
         with open_notes(create=False) as store:
             entry_or_404(store, entry_id)
             return {"heading": checked(lambda: store.rename_section(entry_id, data.heading, data.new_heading))}
+
+    # --- The master list of sub-headings ----------------------------------------------
+
+    @app.put("/api/headings/order")
+    def order_headings(data: HeadingOrderIn, x_book_searchie: str | None = Header(default=None)):
+        """Reorder the list; every entry shows its sub-headings in this order."""
+        require_app_header(x_book_searchie)
+        with open_notes() as store:
+            store.reorder_headings(data.names)
+            return headings()
+
+    @app.post("/api/headings/rename")
+    def rename_heading_everywhere(data: HeadingNameIn, x_book_searchie: str | None = Header(default=None)):
+        """Rename a sub-heading in every entry; renaming to one on the list merges the two."""
+        require_app_header(x_book_searchie)
+        with open_notes() as store:
+            name, merged = checked(lambda: store.rename_heading(data.name, data.new_name))
+        return {"name": name, "merged": merged}
+
+    @app.delete("/api/headings")
+    def remove_heading(name: str, x_book_searchie: str | None = Header(default=None)):
+        """Take a sub-heading that no entry uses off the list."""
+        require_app_header(x_book_searchie)
+        with open_notes() as store:
+            if not checked(lambda: store.remove_heading(name)):
+                raise HTTPException(404, "That sub-heading isn't on the list.")
+        return {"deleted": name}

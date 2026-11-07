@@ -1,0 +1,60 @@
+{# The KB's left column: every entry A to Z (or search results), each opening to its sub-headings. #}
+{% set cur = current.entry.id if current else None %}
+{% set extra = ('?' ~ {'q': kb_q}|urlencode) if kb_q else (('?' ~ {'tag': tag}|urlencode) if tag else '') %}
+<details class="kb-side" id="kb-side" open>
+  <summary class="kb-side-toggle">{{ 'Results' if kb_q else 'Entries' }} <span class="dim">({{ hits|length if kb_q else entries|length }})</span></summary>
+  <nav class="kb-list" id="kb-list" aria-label="KB entries">
+    <form class="kb-filter" action="/kb" method="get" role="search">
+      <input type="search" name="q" id="kb-filter" value="{{ kb_q }}" placeholder="Filter, or Enter to search" aria-label="Filter entries, or press Enter to search the KB" autocomplete="off">
+    </form>
+
+    {% if tag %}
+    <p class="kb-list-note">Tagged <strong>{{ tag }}</strong> · <a href="/kb">show all</a></p>
+    {% elif kb_q %}
+    <p class="kb-list-note">{{ hits|length }} entr{{ 'ies' if hits|length != 1 else 'y' }} for <strong>{{ kb_q }}</strong> · <a href="/kb">show all</a></p>
+    {% endif %}
+    {% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+
+    {% if kb_q %}
+    <ul class="kb-titles">
+      {% for h in hits %}
+      <li class="kb-title-item{{ ' current' if h.entry.id == cur }}">
+        <a class="kb-title" href="/kb/entry/{{ h.entry.id }}{{ extra }}">{{ h.entry.title }}</a>
+        {% if h.found_in %}
+        <ul class="kb-found">
+          {% for f in h.found_in %}
+          <li><a href="/kb/entry/{{ h.entry.id }}{{ extra }}#{{ f.id }}"><span class="kb-found-head">{{ f.heading }}</span> <span class="kb-snippet">{{ f.snippet }}</span></a></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% if not hits and not error %}<p class="dim small">No entries match. Try fewer words, or a word with * on the end.</p>{% endif %}
+    {% else %}
+    <ul class="kb-titles">
+      {% for e in entries %}
+      {% set open_it = e.id == cur %}
+      <li class="kb-title-item{{ ' current' if open_it }}" data-names="{{ ([e.title] + e.aliases)|join('\n')|lower }}">
+        {% if e.headings %}
+        <button type="button" class="kb-expand" aria-expanded="{{ 'true' if open_it else 'false' }}" aria-label="Show sub-headings of {{ e.title }}" aria-controls="kb-heads-{{ e.id }}"></button>
+        {% else %}<span class="kb-expand-space"></span>{% endif %}
+        <a class="kb-title" href="/kb/entry/{{ e.id }}{{ extra }}"{% if open_it %} aria-current="page"{% endif %}>{{ e.title }}</a>
+        {% if e.headings %}
+        <ul class="kb-heads" id="kb-heads-{{ e.id }}"{% if not open_it %} hidden{% endif %}>
+          {% for h in e.headings %}<li><a href="/kb/entry/{{ e.id }}{{ extra }}#{{ heading_id(h) }}">{{ h }}</a></li>{% endfor %}
+        </ul>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="dim small" id="kb-filter-none" hidden>No titles match. Press Enter to search the text as well.</p>
+    {% endif %}
+
+    <div class="kb-side-actions">
+      <button type="button" class="btn" id="kb-new-entry">New entry</button>
+      <a class="btn subtle" href="/kb/headings">Sub-headings</a>
+      <a class="btn subtle" href="/kb/tags">Tags and backup</a>
+    </div>
+  </nav>
+</details>

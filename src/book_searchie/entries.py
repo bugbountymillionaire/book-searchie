@@ -642,29 +642,91 @@ class EntriesMixin:
             ).fetchone()
             if row is None:
                 raise EntryInvalid(f"This entry has no sub-heading \"{heading}\".")
-            section_id = row[0]
-            new_heading = clean_heading(new_heading)
-            into = self.conn.execute(
-                "SELECT id FROM sections WHERE entry_id = ? AND heading = ?", (entry_id, new_heading)
-            ).fetchone()
-            if into is None or into[0] == section_id:
-                new_heading = self._heading_for(None, new_heading)
-                self._remember_heading(new_heading)
-                self.conn.execute("UPDATE sections SET heading = ? WHERE id = ?", (new_heading, section_id))
-            else:
-                end = self.conn.execute(
-                    "SELECT COALESCE(MAX(position), -1) + 1 FROM pieces WHERE section_id = ?", (into[0],)
-                ).fetchone()[0]
-                self.conn.execute(
-                    "UPDATE pieces SET section_id = ?, position = position + ? WHERE section_id = ?",
-                    (into[0], end, section_id),
-                )
-                self.conn.execute("DELETE FROM sections WHERE id = ?", (section_id,))
-                self.conn.execute("DELETE FROM sections_fts WHERE rowid = ?", (section_id,))
-                section_id = into[0]
+            new_heading = self._heading_for(None, clean_heading(new_heading))
+            self._remember_heading(new_heading)
+            section_id = self._rename_section(entry_id, row[0], new_heading)
             self._touch(entry_id)
             self._reindex_entry(entry_id)
             return self.conn.execute("SELECT heading FROM sections WHERE id = ?", (section_id,)).fetchone()[0]
+
+    def _rename_section(self, entry_id: int, section_id: int, new_heading: str) -> int:
+        """Give a section a new heading, or if its entry already has that one, move its text
+        to the end of it. Returns the section the text is in now."""
+        into = self.conn.execute(
+            "SELECT id FROM sections WHERE entry_id = ? AND heading = ?", (entry_id, new_heading)
+        ).fetchone()
+        if into is None or into[0] == section_id:
+            self.conn.execute("UPDATE sections SET heading = ? WHERE id = ?", (new_heading, section_id))
+            return section_id
+        end = self.conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM pieces WHERE section_id = ?", (into[0],)
+        ).fetchone()[0]
+        self.conn.execute(
+            "UPDATE pieces SET section_id = ?, position = position + ? WHERE section_id = ?",
+            (into[0], end, section_id),
+        )
+        self.conn.execute("DELETE FROM sections WHERE id = ?", (section_id,))
+        self.conn.execute("DELETE FROM sections_fts WHERE rowid = ?", (section_id,))
+        return into[0]
+
+    # --- the master list of sub-headings: order, rename and merge, remove ---
+
+    def reorder_headings(self, names: list[str]) -> list[str]:
+        """Put the master list in this order. Any left out keep their order, after these.
+        Returns the list."""
+        with self.conn:
+            current = self.headings
+            given: list[str] = []
+            for name in names:
+                match = next((h for h in current if h.casefold() == _norm(name).casefold()), None)
+                if match is not None and match not in given:
+                    given.append(match)
+            order = given + [h for h in current if h not in given]
+            self.conn.executemany("UPDATE headings SET position = ? WHERE name = ?", list(enumerate(order)))
+        return self.headings
+
+    def rename_heading(self, name: str, new_name: str) -> tuple[str, bool]:
+        """Rename a sub-heading in every entry. If the new name is already on the list, the
+        two are merged: in each entry, text under the old one goes to the end of the new one.
+
+        Returns (the sub-heading's name now, whether it was merged)."""
+        new_name = clean_heading(new_name)
+        with self.conn:
+            row = self.conn.execute("SELECT id, name FROM headings WHERE name = ?", (_norm(name),)).fetchone()
+            if row is None:
+                raise EntryInvalid(f"There's no sub-heading called \"{name}\".")
+            target = self.conn.execute("SELECT id, name FROM headings WHERE name = ?", (new_name,)).fetchone()
+            merged = target is not None and target[0] != row[0]
+            final = target[1] if merged else new_name
+            affected = self.conn.execute(
+                "SELECT id, entry_id FROM sections WHERE heading = ?", (row[1],)).fetchall()
+            for section_id, entry_id in affected:
+                self._rename_section(entry_id, section_id, final)
+            if merged:
+                self.conn.execute("DELETE FROM headings WHERE id = ?", (row[0],))
+            else:
+                self.conn.execute("UPDATE headings SET name = ? WHERE id = ?", (final, row[0]))
+            for entry_id in {e for _, e in affected}:
+                self._touch(entry_id)
+                self._reindex_entry(entry_id)
+        return final, merged
+
+    def remove_heading(self, name: str) -> bool:
+        """Take a sub-heading no entry uses off the list. Returns False if it isn't on it."""
+        with self.conn:
+            row = self.conn.execute("SELECT id, name FROM headings WHERE name = ?", (_norm(name),)).fetchone()
+            if row is None:
+                return False
+            used = self.conn.execute("SELECT COUNT(*) FROM sections WHERE heading = ?", (row[1],)).fetchone()[0]
+            if used:
+                raise EntryInvalid(
+                    f"{used} entr{'ies use' if used != 1 else 'y uses'} \"{row[1]}\". "
+                    "To combine it with another sub-heading, rename it to that one."
+                )
+            if self.conn.execute("SELECT COUNT(*) FROM headings").fetchone()[0] == 1:
+                raise EntryInvalid("The list needs at least one sub-heading.")
+            self.conn.execute("DELETE FROM headings WHERE id = ?", (row[0],))
+        return True
 
     def _set_entry_tags(self, entry_id: int, tags) -> None:
         seen = set()

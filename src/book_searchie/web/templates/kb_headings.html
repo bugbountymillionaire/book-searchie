@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Sub-headings · KB · Book-Searchie{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/kb">← KB</a></p>
+<h1>Sub-headings</h1>
+<p class="lede">Every entry shows its sub-headings in this order. Drag one, or use ↑ and ↓, to move it.
+  Text saved without a sub-heading goes under the first one.</p>
+
+<ol class="heading-list" id="heading-list">
+  {% for h in headings %}
+  <li class="heading-row" draggable="true" data-name="{{ h.name }}">
+    <span class="heading-grip" aria-hidden="true">⠿</span>
+    <span class="heading-name">{{ h.name }}</span>
+    <span class="dim small heading-count">{{ h.entries }} entr{{ 'ies' if h.entries != 1 else 'y' }}</span>
+    <span class="heading-actions">
+      <button type="button" class="link-button" data-act="up" aria-label="Move {{ h.name }} up" title="Move up">↑</button>
+      <button type="button" class="link-button" data-act="down" aria-label="Move {{ h.name }} down" title="Move down">↓</button>
+      <button type="button" class="link-button" data-act="rename">Rename</button>
+      {% if not h.entries %}<button type="button" class="link-button danger" data-act="remove">Remove</button>{% endif %}
+    </span>
+  </li>
+  {% endfor %}
+</ol>
+<p class="kb-status" id="heading-status" role="status"></p>
+
+<p class="dim small">A new sub-heading is added to the end of the list the first time you type it after <kbd>#</kbd>.
+  Renaming one to the name of another merges the two in every entry.</p>
+{% endblock %}
+{% block scripts %}
+<script src="/static/kb_headings.js?v={{ static_version }}"></script>
+{% endblock %}

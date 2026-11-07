@@ -1,0 +1,91 @@
+{# The open KB entry: title, other names, tags, and its sub-headings, each folding open and shut.
+   kb_entries.js does the editing. #}
+{% if current %}
+{% set e = current.entry %}
+<article class="kb-entry" id="kb-entry" data-entry-id="{{ e.id }}" data-title="{{ e.title }}" data-q="{{ kb_q }}">
+  <header class="kb-entry-head">
+    <h1>{{ e.title }}</h1>
+    <div class="kb-entry-actions">
+      <button type="button" class="btn subtle" data-act="rename" title="Rename; renaming to another entry's title merges the two">Rename</button>
+      <button type="button" class="btn subtle danger" data-act="delete-entry">Delete</button>
+    </div>
+  </header>
+
+  <div class="kb-entry-meta">
+    <p class="kb-also">
+      {% if e.aliases %}<span class="dim">Also called</span>
+      {% for a in e.aliases %}<span class="kb-name">{{ a }}<button type="button" class="kb-x" data-act="remove-alias" data-alias="{{ a }}" aria-label="Remove the other name {{ a }}" title="Remove">×</button></span>{% endfor %}
+      {% endif %}
+      <button type="button" class="link-button small" data-act="add-alias">+ other name</button>
+    </p>
+    <p class="kb-tags-line">
+      <span class="dim">Tags</span>
+      {% for t in e.tags %}<span class="kb-name tag-name"><a href="/kb?{{ {'tag': t}|urlencode }}">{{ t }}</a><button type="button" class="kb-x" data-act="remove-tag" data-tag="{{ t }}" aria-label="Remove the tag {{ t }}" title="Remove">×</button></span>{% endfor %}
+      {% if not e.tags %}<span class="dim">none</span>{% endif %}
+      <button type="button" class="link-button small" data-act="add-tag">+ tag</button>
+    </p>
+  </div>
+
+  {% if not current.sections %}
+  <p class="notice">No text in {{ e.title }} yet. Add some below, or from a book with <em>Save to KB</em>.</p>
+  {% endif %}
+
+  {% for s in current.sections %}
+  <details class="kb-section" id="{{ s.id }}" data-heading="{{ s.heading }}"{% if loop.first %} open{% endif %}>
+    <summary><h2>{{ s.heading }}</h2> <span class="dim small">{{ s.pieces|length }} piece{{ 's' if s.pieces|length != 1 }}</span></summary>
+    <div class="kb-pieces">
+      {% for p in s.pieces %}
+      <div class="kb-piece" id="piece-{{ p.id }}" data-piece-id="{{ p.id }}" data-heading="{{ s.heading }}" data-body="{{ p.body }}">
+        <div class="kb-piece-body">{{ p.html }}</div>
+        <div class="kb-piece-actions">
+          <button type="button" class="link-button" data-act="edit">Edit</button>
+          {% if not loop.first %}<button type="button" class="link-button" data-act="position" data-position="{{ loop.index0 - 1 }}" title="Move up" aria-label="Move up">↑</button>{% endif %}
+          {% if not loop.last %}<button type="button" class="link-button" data-act="position" data-position="{{ loop.index0 + 1 }}" title="Move down" aria-label="Move down">↓</button>{% endif %}
+          <button type="button" class="link-button" data-act="move" title="Move to another entry">Move to…</button>
+          {% if p.book_url %}<a class="link-button" href="{{ p.book_url }}" title="Open the page this came from">Book ↗</a>{% endif %}
+          <button type="button" class="link-button danger" data-act="delete">Delete</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="link-button small kb-add-here" data-act="add" data-heading="{{ s.heading }}">+ Add text under {{ s.heading }}</button>
+  </details>
+  {% endfor %}
+
+  <div class="kb-add-new">
+    <button type="button" class="btn" data-act="add" data-heading="">+ Add text</button>
+  </div>
+</article>
+
+<template id="kb-editor-template">
+  <form class="kb-editor" autocomplete="off">
+    <div class="kb-text-wrap">
+      <textarea class="kb-editor-text" rows="7" aria-label="Text" spellcheck="true"
+                placeholder="Your text. Start a line with # for a sub-heading."></textarea>
+      <div class="kb-ghost" aria-hidden="true"></div>
+      <ul class="kb-heading-menu" role="listbox" aria-label="Sub-headings" hidden></ul>
+    </div>
+    <details class="kb-editor-source">
+      <summary>Where it's from <span class="dim">(optional)</span></summary>
+      <input name="source_ref" maxlength="500" placeholder="e.g. a course, a website, a person" aria-label="Where it's from">
+      <input name="source_url" maxlength="500" placeholder="https://… (optional)" aria-label="Link">
+    </details>
+    <p class="kb-status" role="status"></p>
+    <div class="kb-actions">
+      <button type="submit" class="primary">Save</button>
+      <button type="button" data-act="cancel">Cancel</button>
+      <span class="dim small kb-hint">Ctrl+Enter · <kbd>#</kbd> for a sub-heading</span>
+    </div>
+  </form>
+</template>
+{% else %}
+<div class="kb-entry kb-empty" id="kb-entry">
+  {% if total %}
+  <p>{{ 'Nothing matches.' if kb_q or tag else 'Pick an entry on the left.' }}</p>
+  {% else %}
+  <h1>Your KB</h1>
+  <p>Your KB is made of <strong>entries</strong>, such as <em>Nettle</em> or <em>Birch Tree</em>, each with sub-headings like <em>Description</em> and <em>Tea</em>.</p>
+  <p>To add to it while reading, select some text in a book and press <kbd>s</kbd> (or <em>Save to KB</em>), then type the entry's name. Or start one here with <em>New entry</em>.</p>
+  {% endif %}
+</div>
+{% endif %}

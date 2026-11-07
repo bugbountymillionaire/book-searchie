@@ -228,3 +228,18 @@ def test_headings_typed_in_the_text(client, db):
 def test_headings_before_there_is_a_notes_file(client, config):
     assert [h["name"] for h in client.get("/api/headings").json()["headings"]] == config.headings
     assert not config.notes_path.exists()
+
+
+def test_heading_list_api(client):
+    add(client, title="Nettle", body="# Infusion\nLeaves.")
+    names = lambda: [h["name"] for h in client.get("/api/headings").json()["headings"]]  # noqa: E731
+    res = client.put("/api/headings/order", json={"names": ["Infusion", "Tea"]}, headers=H)
+    assert res.status_code == 200 and [h["name"] for h in res.json()["headings"]][:3] == ["Infusion", "Tea", "Description"]
+    assert client.post("/api/headings/rename", json={"name": "infusion", "new_name": "Tea"}, headers=H).json() == {
+        "name": "Tea", "merged": True}
+    assert names()[:2] == ["Tea", "Description"]
+    res = client.delete("/api/headings?name=Tea", headers=H)
+    assert res.status_code == 400 and "1 entry uses" in res.json()["error"]
+    assert client.delete("/api/headings?name=Cautions", headers=H).json() == {"deleted": "Cautions"}
+    assert client.delete("/api/headings?name=Cautions", headers=H).status_code == 404
+    assert client.put("/api/headings/order", json={"names": []}).status_code == 403

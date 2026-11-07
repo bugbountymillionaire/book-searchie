@@ -482,3 +482,32 @@ def test_new_file_heading_list_comes_from_the_config(tmp_path):
         assert s.headings == ["Uses", "Growing"]
     with NotesStore.open(tmp_path / "n.db", ["Changed"]) as s:
         assert s.headings == ["Uses", "Growing"]  # after that, the list is in the KB
+
+
+def test_reorder_rename_and_remove_headings(store):
+    store.add_text("Nettle", "# Infusion\na\n# Tea\nb")
+    store.add_text("Yarrow", "# Infusion\nc")
+
+    assert store.reorder_headings(["tea", "Cautions", "nonsense", "Tea"])[:3] == ["Tea", "Cautions", "Description"]
+    assert store.find_entry("Nettle").headings == ["Tea", "Infusion"]
+
+    # Renaming to a new name keeps its place on the list.
+    assert store.rename_heading("infusion", "Tisane") == ("Tisane", False)
+    assert store.headings[-1] == "Tisane"
+    assert store.find_entry("Yarrow").headings == ["Tisane"]
+    assert store.search_entries("tisane")[1] == 2
+
+    # Renaming onto one on the list merges them in every entry.
+    assert store.rename_heading("Tisane", "tea") == ("Tea", True)
+    assert "Tisane" not in store.headings
+    nettle = store.find_entry("Nettle")
+    assert [(s.heading, [p.body for p in s.pieces]) for s in nettle.sections] == [("Tea", ["b", "a"])]
+    assert store.find_entry("Yarrow").headings == ["Tea"]
+    with pytest.raises(EntryInvalid, match="no sub-heading"):
+        store.rename_heading("Nope", "x")
+
+    with pytest.raises(EntryInvalid, match="2 entries use"):
+        store.remove_heading("Tea")
+    assert store.remove_heading("cautions")
+    assert not store.remove_heading("Cautions")
+    assert "Cautions" not in store.headings

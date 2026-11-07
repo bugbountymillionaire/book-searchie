@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from book_searchie.indexer import run_index
+from book_searchie.entries import Piece
 from book_searchie.notes import Note, NotesStore, Tag
 from book_searchie.web.app import create_app
 
@@ -54,36 +55,82 @@ def test_header_links_to_the_kb(client):
 
 def test_empty_kb(client, config):
     page = client.get("/kb")
-    assert page.status_code == 200 and "Your knowledge base is empty" in page.text
-    assert 'href="/kb/new"' in page.text and "Save to KB" in page.text
+    assert page.status_code == 200 and "Your KB is made of" in page.text
+    assert 'id="kb-new-entry"' in page.text and "Save to KB" in page.text
+    assert 'href="/kb/headings"' in page.text
     assert not config.notes_path.exists()  # looking doesn't create the notes file
 
 
-def test_kb_home_lists_tags_and_recent_notes(client, notes, db):
-    n = add_samples(notes, db)
+def add_entries(notes, db):
+    culpeper = file_row(db, "Culpeper")
+    notes.add_text("Nettle", "Stinging hairs on the <leaves>.\n# Tea\nPour on **boiling** water.",
+                   Piece(body="x", path=culpeper["path"], seq=1, label="2", book_title="Culpeper", topic="Herbalism"))
+    notes.add_text("Birch", "# Sap\nTapped in early spring.")
+    nettle = notes.find_entry("Nettle")
+    notes.add_entry_alias(nettle.id, "Urtica dioica")
+    notes.set_entry_tags(nettle.id, ["Rose / hip & haw"])
+    return nettle, notes.find_entry("Birch"), culpeper["id"]
+
+
+def test_kb_lists_entries_and_opens_the_first(client, notes, db):
+    nettle, birch, culpeper = add_entries(notes, db)
     page = client.get("/kb").text
-    assert "4 notes in your knowledge base" in page
-    assert '<a class="chip" href="/kb/tag/plant/Nettle">Nettle<span>2</span></a>' in page
-    assert '<a class="chip" href="/kb/tag/condition/Hot%20flushes">Hot flushes<span>1</span></a>' in page
-    assert page.index(f'id="note-{n["own"].id}"') < page.index(f'id="note-{n["book"].id}"')  # newest first
     assert 'aria-current="page">KB</a>' in page
+    assert page.index(f'href="/kb/entry/{birch.id}"') < page.index(f'href="/kb/entry/{nettle.id}"')  # A to Z
+    assert 'data-names="nettle\nurtica dioica"' in page
+    assert f'<h1>Birch</h1>' in page and "Tapped in early spring." in page  # the first entry is open
+    assert f'<a href="/kb/entry/{nettle.id}#h-tea">Tea</a>' in page
 
 
-def test_note_cards_show_their_source(client, notes, db):
-    n = add_samples(notes, db)
-    culpeper = file_row(db, "Culpeper")["id"]
-    herbal = file_row(db, "Modern Herbal")["id"]
-    page = client.get("/kb").text
-    assert '<span class="source-badge book">Book</span>' in page
-    assert f'<a href="/view/{culpeper}/1">Culpeper, p. 2</a>' in page
-    assert f'<a href="/view/{herbal}/1">Modern Herbal, Leaves</a>' in page  # EPUB: the chapter, not "p."
-    assert '<span class="source-badge other">Other source</span>' in page
-    assert 'href="https://example.org/walk" rel="noopener noreferrer" target="_blank">Spring foraging walk ↗</a>' in page
-    assert '<span class="source-badge own">Own knowledge</span>' in page
-    # The body is formatted, and anything else in it is escaped.
-    assert "<p>Pick the <strong>top</strong> leaves.</p><ul><li>gloves</li><li>scissors</li></ul>" in page
-    assert "Dry-fit &lt;everything&gt; first." in page
-    assert f'href="/kb/note/{n["own"].id}/edit"' in page
+def test_entry_page(client, notes, db):
+    nettle, _, culpeper = add_entries(notes, db)
+    page = client.get(f"/kb/entry/{nettle.id}").text
+    assert "<title>Nettle · KB" in page and "<h1>Nettle</h1>" in page
+    assert 'data-alias="Urtica dioica"' in page
+    assert 'href="/kb?tag=Rose+%2F+hip+%26+haw"' in page
+    # Sub-headings in the list's order, the first open; text formatted and escaped; links to the book.
+    assert page.index('id="h-description"') < page.index('id="h-tea"')
+    assert '<details class="kb-section" id="h-description" data-heading="Description" open>' in page
+    assert "<p>Pour on <strong>boiling</strong> water.</p>" in page and "&lt;leaves&gt;" in page
+    assert f'href="/view/{culpeper}/1"' in page
+    assert client.get("/kb/entry/999").status_code == 404
+
+
+def test_kb_parts_for_the_script(client, notes, db):
+    nettle, _, _ = add_entries(notes, db)
+    entry = client.get(f"/kb/entry/{nettle.id}", params={"part": "entry"}).text
+    assert entry.lstrip().startswith("<article") and "<html" not in entry
+    listing = client.get(f"/kb/entry/{nettle.id}", params={"part": "list"}).text
+    assert listing.lstrip().startswith("<details") and "<html" not in listing
+
+
+def test_kb_search_and_tag(client, notes, db):
+    nettle, birch, _ = add_entries(notes, db)
+    page = client.get("/kb", params={"q": "boiling"}).text
+    assert "1 entry for <strong>boiling</strong>" in page
+    assert f'href="/kb/entry/{nettle.id}?q=boiling#h-tea"' in page and "<mark>boiling</mark>" in page
+    assert 'data-q="boiling"' in page and "<h1>Nettle</h1>" in page
+    assert "Birch</a>" not in page
+    assert client.get("/kb", params={"q": '"unclosed'}).status_code == 200
+
+    tagged = client.get("/kb", params={"tag": "rose / HIP & haw"}).text
+    assert "Tagged <strong>Rose / hip &amp; haw</strong>" in tagged
+    assert f'href="/kb/entry/{nettle.id}?tag=Rose' in tagged and f'/kb/entry/{birch.id}' not in tagged
+
+
+def test_headings_page(client, notes, db):
+    add_entries(notes, db)
+    page = client.get("/kb/headings").text
+    assert "<h1>Sub-headings</h1>" in page and "kb_headings.js" in page
+    tea = page.split('data-name="Tea"')[1].split("</li>")[0]
+    assert "1 entry" in tea and 'data-act="remove"' not in tea  # in use: can't remove
+    sap = page.split('data-name="Sap"')[1].split("</li>")[0]
+    assert 'data-act="rename"' in sap
+
+
+def test_headings_page_before_any_notes(client, config):
+    page = client.get("/kb/headings").text
+    assert f'data-name="{config.headings[0]}"' in page and not config.notes_path.exists()
 
 
 def test_book_notes_title_defaults_to_the_quote(client, notes, db):
@@ -99,7 +146,6 @@ def test_missing_book(client, notes, db, config, library):
     page = client.get(f"/kb/note/{n['book'].id}").text
     assert "Culpeper, p. 2" in page and "/view/" not in page.split('class="note-source"')[1].split("</p>")[0]
     assert ">source missing</span>" in page
-    assert "1 note is from a book that's no longer in the library" in client.get("/kb").text
 
 
 def test_tag_page_groups_by_another_kind(client, notes, db):
@@ -120,8 +166,6 @@ def test_tag_page_groups_by_another_kind(client, notes, db):
 def test_tag_with_awkward_characters(client, notes):
     notes.create(Note(source_type="own", topic="Herbalism", title="Mix", body="x",
                       tags=[Tag("plant", "Rose / hip & haw")]))
-    page = client.get("/kb").text
-    assert 'href="/kb/tag/plant/Rose%20%2F%20hip%20%26%20haw"' in page
     assert client.get("/kb/tag/plant/Rose%20%2F%20hip%20%26%20haw").status_code == 200
 
 

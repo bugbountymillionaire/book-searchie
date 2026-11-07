@@ -1,20 +1,25 @@
-"""The KB pages: browse notes by tag, see recent notes, and write or edit a note."""
+"""The KB pages: entries in two columns (titles on the left, the open entry on the right),
+the list of sub-headings, and the older pages for notes."""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
-from urllib.parse import quote
-
 from datetime import date
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
+from markupsafe import Markup
 
 from .. import markdown
 from ..config import Config
 from ..db import Database
+from ..entries import Entry
 from ..notes import Note
 from ..notes_backup import export_json_text, export_markdown
+from ..search import QueryError
+from .entries_api import _CLOSE, _OPEN, snippet_html
 from .notes_api import file_ids, open_notes_for
 
 NOTES_PER_PAGE = 20
@@ -48,6 +53,27 @@ def note_view(note: Note, ids: dict[str, int]) -> dict:
     }
 
 
+def heading_id(heading: str) -> str:
+    """The id of a sub-heading on an entry's page, for links like #h-infused-oil."""
+    return "h-" + (re.sub(r"[^a-z0-9]+", "-", heading.lower()).strip("-") or "x")
+
+
+def entry_view(db: Database, entry: Entry) -> dict:
+    """An entry, ready for the entry template."""
+    ids = file_ids(db, [p for s in entry.sections for p in s.pieces])
+    sections = []
+    for s in entry.sections:
+        pieces = []
+        for p in s.pieces:
+            file_id = ids.get(p.path) if p.source_type == "book" and not p.source_missing else None
+            pieces.append({
+                "id": p.id, "body": p.body, "html": Markup(markdown.render(p.body)),
+                "book_url": f"/view/{file_id}/{p.seq}" if file_id is not None else None,
+            })
+        sections.append({"heading": s.heading, "id": heading_id(s.heading), "pieces": pieces})
+    return {"entry": entry, "sections": sections}
+
+
 def add_kb_pages(app: FastAPI, config: Config, open_db: Callable[[], Database], page: Callable) -> None:
     def views(db: Database, notes: list[Note]) -> list[dict]:
         ids = file_ids(db, notes)
@@ -59,21 +85,58 @@ def add_kb_pages(app: FastAPI, config: Config, open_db: Callable[[], Database], 
             raise HTTPException(404, "That note isn't in your KB. It may have been deleted.")
         return note
 
-    @app.get("/kb")
-    def kb_home(request: Request, page_no: int = 1):
+    # --- Entries: titles on the left, the open entry on the right ------------------------
+
+    def kb_view(request: Request, entry_id: int | None, q: str, tag: str, part: str):
+        """The KB page. part="entry" or "list" gives just that column, for the page's script
+        to swap in after a change."""
+        q, tag = q.strip(), " ".join(tag.split())
         with open_db() as db, open_notes_for(config, create=False) as store:
-            total = store.count() if store else 0
-            pages = max(1, -(-total // NOTES_PER_PAGE))
-            page_no = min(max(1, page_no), pages)
-            recent = store.recent(NOTES_PER_PAGE, (page_no - 1) * NOTES_PER_PAGE) if store else []
-            # Every configured kind, then any kinds still on notes but no longer in the config.
-            tags = {kind: [] for kind in config.tag_kinds}
-            for t in store.tags(by_name=True) if store else []:
-                tags.setdefault(t.kind, []).append({"name": t.name, "notes": t.notes, "url": tag_url(t.kind, t.name)})
-            return page(
-                request, "kb.html", db, section="kb", total=total, notes=views(db, recent), tags=tags,
-                missing=store.missing_count() if store else 0, page_no=page_no, pages=pages,
+            entries, hits, error = [], [], ""
+            if store and q:
+                try:
+                    found, _ = store.search_entries(q, limit=200, mark=(_OPEN, _CLOSE))
+                except QueryError as e:
+                    error, found = str(e), []
+                hits = [{
+                    "entry": h.entry, "title_match": h.title_match,
+                    "found_in": [{"heading": s.heading, "id": heading_id(s.heading),
+                                  "snippet": Markup(snippet_html(s.snippet))} for s in h.sections],
+                } for h in found]
+            elif store:
+                entries = store.entry_list(tag=tag or None)
+                if tag:
+                    tag = store.resolve_tag("tag", tag) or tag  # the tag's own name, for the heading
+            current = None
+            if entry_id is not None:
+                found_entry = store.get_entry(entry_id) if store else None
+                if found_entry is None:
+                    raise HTTPException(404, "That entry isn't in your KB. It may have been deleted or merged.")
+                current = entry_view(db, found_entry)
+            elif store and (hits or entries):
+                current = entry_view(db, store.get_entry((hits[0]["entry"] if hits else entries[0]).id))
+            context = dict(
+                section="kb", kb_q=q, tag=tag, entries=entries, hits=hits, error=error, current=current,
+                total=store.entry_count() if store else 0, heading_id=heading_id,
             )
+            name = {"entry": "_kb_entry.html", "list": "_kb_list.html"}.get(part, "kb.html")
+            return page(request, name, db, **context)
+
+    @app.get("/kb")
+    def kb_home(request: Request, q: str = "", tag: str = "", part: str = ""):
+        return kb_view(request, None, q, tag, part)
+
+    @app.get("/kb/entry/{entry_id}")
+    def kb_entry(request: Request, entry_id: int, q: str = "", tag: str = "", part: str = ""):
+        return kb_view(request, entry_id, q, tag, part)
+
+    @app.get("/kb/headings")
+    def kb_headings(request: Request):
+        """The master list of sub-headings: reorder, rename and merge, remove."""
+        with open_db() as db, open_notes_for(config, create=False) as store:
+            found = store.heading_counts() if store else [(h, 0) for h in config.headings]
+            return page(request, "kb_headings.html", db, section="kb",
+                        headings=[{"name": n, "entries": c} for n, c in found])
 
     @app.get("/kb/new")
     def kb_new(request: Request):
