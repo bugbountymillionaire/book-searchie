@@ -190,6 +190,9 @@ a.btn:hover { text-decoration: none; border-color: var(--accent); }
 }
 /* On wide screens the page moves over rather than being covered. */
 @media (min-width: 1000px) { body.kb-open { margin-right: var(--kb-width, 420px); } }
+/* With the panel open beside the book, the header is narrow: hide the search-in boxes, which
+   still apply your last choice, so the search box keeps its room. */
+@media (max-width: 1599px) { body.kb-open .scope { display: none; } }
 /* The divider: the panel's left edge, dragged to change its width. */
 .kb-resize {
   position: fixed; top: 0; bottom: 0; right: calc(var(--kb-width, 420px) - 5px); width: 10px; z-index: 21;

@@ -4,7 +4,7 @@
     python tools/demo_library.py E:/BookSearchieDemo
     python tools/screenshots.py E:/BookSearchieDemo --browser msedge
 
-Starts Book-Searchie on the demo library (port 8005), photographs four pages at 1280x800
+Starts Book-Searchie on the demo library (port 8005), photographs six pages at 1280x800
 in light mode into docs/screenshots/, and stops the server again.
 
 --browser picks an installed browser: msedge or chrome. Without it, Playwright's own
@@ -53,19 +53,50 @@ def best_section(db: sqlite3.Connection, file_id: int, word: str) -> int:
     return seq
 
 
-def shots(config_path: Path) -> list[tuple[str, str, int]]:
-    """(file name, page to open, how many times to press "n" for the next match)."""
+def open_sections(page) -> None:
+    """Open every sub-heading of the KB entry."""
+    page.evaluate("document.querySelectorAll('.kb-section').forEach((d) => (d.open = true))")
+
+
+def save_to_kb(page) -> None:
+    """Select the paragraph with the match, press s, and start a sub-heading after it."""
+    page.evaluate("""() => {
+        const m = document.querySelector('#chapter mark.current') || document.querySelector('#chapter mark');
+        const range = document.createRange();
+        range.selectNodeContents(m.closest('p'));
+        getSelection().removeAllRanges();
+        getSelection().addRange(range);
+    }""")
+    page.keyboard.press("s")
+    page.wait_for_timeout(900)
+    page.fill("#kb-entry", "comfrey")  # an existing entry, in any capitals
+    page.focus("#kb-text")
+    page.keyboard.press("Control+End")
+    page.keyboard.type("\n# Harv")  # the rest of "Harvesting" is suggested, for Tab
+    page.wait_for_timeout(600)
+
+
+def shots(config_path: Path) -> list[tuple[str, str, object]]:
+    """(file name, page to open, what to do there: keys to press, such as "n" for the next
+    match, or a function given the page)."""
     config = load_config(config_path)
     db = sqlite3.connect(config.index_path)
     ids = {title: (fid, Path(path)) for fid, title, path in db.execute("SELECT id, title, path FROM files")}
     joints, joints_path = ids["Fairham - Woodwork Joints"]
-    herbal, _ = ids["Culpeper - The Complete Herbal"]
+    herbal, herbal_path = ids["Culpeper - The Complete Herbal"]
+    notes = sqlite3.connect(config.notes_path)
+    # The chapter the demo's Comfrey text was saved from, so the panel lists it.
+    (comfrey_seq,) = notes.execute(
+        "SELECT seq FROM pieces WHERE path = ? AND body LIKE 'The water of Comfrey%'", (str(herbal_path),)).fetchone()
+    (nettle,) = notes.execute("SELECT id FROM entries WHERE title = 'Nettle'").fetchone()
     return [
-        ("search", "/?q=honey", 0),
+        ("search", "/?q=honey", ""),
         # The second match, so the current-match outline is on a highlighted word mid-page.
-        ("pdf-viewer", f"/view/{joints}/{best_pdf_page(joints_path, 'dovetail')}?q=dovetail", 1),
-        ("epub-viewer", f"/view/{herbal}/{best_section(db, herbal, 'comfrey')}?q=comfrey", 0),
-        ("cant-search", "/problems", 0),
+        ("pdf-viewer", f"/view/{joints}/{best_pdf_page(joints_path, 'dovetail')}?q=dovetail", "n"),
+        ("epub-viewer", f"/view/{herbal}/{best_section(db, herbal, 'comfrey')}?q=comfrey", ""),
+        ("cant-search", "/problems", ""),
+        ("kb", f"/kb/entry/{nettle}", open_sections),
+        ("save-to-kb", f"/view/{herbal}/{comfrey_seq}?q=comfrey", save_to_kb),
     ]
 
 
@@ -107,13 +138,16 @@ def main() -> None:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel=args.browser)
             page = browser.new_page(viewport={"width": 1280, "height": 800}, color_scheme="light")
-            for name, url, steps in plan:
+            for name, url, keys in plan:
                 page.goto(BASE + url)
                 page.wait_for_load_state("load")
                 page.wait_for_timeout(500)
-                for _ in range(steps):
-                    page.keyboard.press("n")
-                    page.wait_for_timeout(900)  # let the smooth scroll finish
+                if callable(keys):
+                    keys(page)
+                else:
+                    for key in keys:
+                        page.keyboard.press(key)
+                        page.wait_for_timeout(900)  # let the smooth scroll or the panel finish
                 page.mouse.move(0, 799)  # nothing hovered
                 page.screenshot(path=OUT / f"{name}.png")
                 print(f"{OUT / name}.png")
