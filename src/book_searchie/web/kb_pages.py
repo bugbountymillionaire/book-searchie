@@ -3,10 +3,13 @@ the list of sub-headings, and the older pages for notes."""
 
 from __future__ import annotations
 
+import io
 import re
+import zipfile
 from collections.abc import Callable
 from datetime import date
-from urllib.parse import quote
+from pathlib import Path
+from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
@@ -17,7 +20,7 @@ from ..config import Config
 from ..db import Database
 from ..entries import Entry
 from ..notes import Note
-from ..notes_backup import export_json_text, export_markdown
+from ..notes_backup import BOOK_TEXT, export_json_text, export_markdown_per_entry
 from ..search import QueryError
 from .entries_api import _CLOSE, _OPEN, snippet_html
 from .notes_api import file_ids, open_notes_for
@@ -164,34 +167,62 @@ def add_kb_pages(app: FastAPI, config: Config, open_db: Callable[[], Database], 
 
     @app.get("/kb/tags")
     def kb_tags(request: Request):
-        """Tidying tags (rename, merge, other names) and backing up the KB."""
+        """Tidying the KB (tags, entry titles, the research list) and backing it up."""
         with open_db() as db, open_notes_for(config, create=False) as store:
-            kinds = {kind: [] for kind in config.tag_kinds}
-            lookup: dict[str, dict[str, str]] = {}  # per kind: any name, in lower case -> the tag's name
-            for t in store.tags(by_name=True) if store else []:
-                kinds.setdefault(t.kind, []).append(
-                    {"name": t.name, "notes": t.notes, "aliases": t.aliases, "url": tag_url(t.kind, t.name)}
-                )
-                for n in [t.name, *t.aliases]:
-                    lookup.setdefault(t.kind, {})[n.lower()] = t.name
+            tags, lookup, entries, entry_lookup, research = [], {}, [], {}, []
+            if store:
+                for name, count, aliases in store.entry_tag_counts():
+                    tags.append({"name": name, "entries": count, "aliases": aliases,
+                                 "url": "/kb?" + urlencode({"tag": name})})
+                    for n in [name, *aliases]:
+                        lookup[n.lower()] = name  # for the merge warning
+                entries = store.entry_list()
+                entry_lookup = {n.lower(): e.title for e in entries for n in [e.title, *e.aliases]}
+                records = store.research_records()
+                paths = sorted({r.path for r in records})
+                ids = {}
+                if paths:
+                    marks = ",".join("?" * len(paths))
+                    ids = {r["path"]: r["id"] for r in db.conn.execute(
+                        f"SELECT id, path FROM files WHERE path IN ({marks})", paths)}
+                groups: dict[str, list[dict]] = {}
+                for r in records:
+                    file_id = ids.get(r.path)
+                    groups.setdefault(r.term, []).append({
+                        "title": r.book_title or Path(r.path).stem, "topic": r.topic, "path": r.path,
+                        "done": r.done[:10], "missing": r.source_missing or file_id is None,
+                        "url": f"/book/{file_id}?" + urlencode({"q": r.term}) if file_id is not None else None,
+                    })
+                research = [{"term": t, "url": "/?" + urlencode({"q": t}), "books": b} for t, b in groups.items()]
             return page(
-                request, "kb_tags.html", db, section="kb", kinds=kinds, lookup=lookup,
-                total=store.count() if store else 0,
+                request, "kb_tags.html", db, section="kb", tags=tags, lookup=lookup, entries=entries,
+                entry_lookup=entry_lookup, research=research, total=store.entry_count() if store else 0,
                 notes_path=config.notes_path,
             )
 
     @app.get("/kb/export")
-    def kb_export(format: str = "json"):
-        """Download the KB: JSON (a full backup) or Markdown (for reading)."""
+    def kb_export(format: str = "json", book: str = "mark"):
+        """Download the KB: JSON (a full backup), or Markdown, one file per entry, in a zip,
+        with text saved from books marked or left out."""
         if format not in ("json", "md"):
             raise HTTPException(400, "The format must be json or md.")
+        if book not in BOOK_TEXT:
+            raise HTTPException(400, "Book text must be mark or omit.")
         with open_notes_for(config, create=False) as store:
-            if store is None:
-                raise HTTPException(404, "There are no notes to export yet.")
-            text = export_json_text(store) if format == "json" else export_markdown(store)
-        name = f"book-searchie-notes-{date.today():%Y-%m-%d}.{format}"
+            if store is None or not (store.entry_count() or store.count()):
+                raise HTTPException(404, "There's nothing in your KB to export yet.")
+            if format == "json":
+                body, media = export_json_text(store).encode("utf-8"), "application/json"
+            else:
+                buffer = io.BytesIO()
+                with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for name, text in export_markdown_per_entry(store, book).items():
+                        zf.writestr(name, text)
+                body, media = buffer.getvalue(), "application/zip"
+        name = f"book-searchie-kb-{date.today():%Y-%m-%d}" + (".json" if format == "json" else
+                                                              "-book-text-left-out.zip" if book == "omit" else ".zip")
         return Response(
-            text, media_type="application/json" if format == "json" else "text/markdown; charset=utf-8",
+            body, media_type=media,
             headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"},
         )
 

@@ -210,3 +210,51 @@ def test_button_only_when_switched_on(client, db, ai_config):
     assert 'id="kb-suggest"' not in off.get("/kb/new").text
     res = off.post("/api/ai/suggest-tags", json={"body": "x"}, headers=H)
     assert res.status_code == 404 and "suggestions are off" in res.json()["error"]
+
+
+# --- Entries (KB v3) ---
+
+
+@pytest.fixture
+def entry_store(ai_config):
+    with NotesStore.open(ai_config.notes_path) as s:
+        s.add_text("Nettle", "Stings.\n# Tea\nFor hay fever and aching joints.")
+        s.add_text("Yarrow", "x")
+        s.set_entry_tags(s.find_entry("Yarrow").id, ["Joint pain", "Wounds"])
+        s.set_entry_tags(s.find_entry("Nettle").id, ["Wounds"])
+        s.add_alias("tag", "Joint pain", "Arthritis")
+        yield s
+
+
+def test_entry_suggestions(ai_config, entry_store, ollama):
+    # A plain list or {"name": ...} items; other names and capitals are tidied to the tag.
+    ollama.reply = json.dumps({"tags": ["Hay fever", {"name": "arthritis"}, "wounds", "Hay Fever", "", "x" * 61]})
+    found = ai.suggest_entry_tags(ai_config, entry_store, title="Nettle", text="For hay fever.", current=["Wounds"])
+    assert [(s.kind, s.name, s.existing) for s in found] == [("tag", "Joint pain", True), ("tag", "Hay fever", False)]
+    prompt = ollama.requests[-1]["body"]["messages"][1]["content"]
+    assert prompt.startswith("Existing tags: Wounds, Joint pain") and "The entry: Nettle\n\nFor hay fever." in prompt
+    assert ai.suggest_entry_tags(ai_config, entry_store, title="Nettle", text="  ") == []  # nothing sent
+    assert len(ollama.requests) == 1
+
+
+def test_entry_suggestions_api(client, entry_store, ollama):
+    nettle = entry_store.find_entry("Nettle").id
+    ollama.reply = '{"tags": ["Hay fever", "Wounds"]}'
+    assert client.post(f"/api/entries/{nettle}/suggest-tags").status_code == 403
+    res = client.post(f"/api/entries/{nettle}/suggest-tags", headers=H)
+    assert res.json() == {"suggestions": [{"name": "Hay fever", "existing": False}]}
+    prompt = ollama.requests[-1]["body"]["messages"][1]["content"]
+    assert "Description:\nStings.\n\nTea:\nFor hay fever and aching joints." in prompt
+    assert client.post("/api/entries/999/suggest-tags", headers=H).status_code == 404
+    page = client.get(f"/kb/entry/{nettle}").text
+    assert 'data-act="suggest-tags"' in page and 'id="kb-suggested"' in page
+
+
+def test_entry_suggestions_off(ai_config, db, entry_store):
+    ai_config.ai_enabled = False
+    run_index(ai_config, db)
+    off = TestClient(create_app(ai_config, allowed_hosts=["testserver"]))
+    nettle = entry_store.find_entry("Nettle").id
+    assert 'data-act="suggest-tags"' not in off.get(f"/kb/entry/{nettle}").text
+    res = off.post(f"/api/entries/{nettle}/suggest-tags", headers=H)
+    assert res.status_code == 404 and "suggestions are off" in res.json()["error"]

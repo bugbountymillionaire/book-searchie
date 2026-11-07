@@ -3,22 +3,21 @@
 {% block content %}
 <p class="crumbs"><a href="/kb">← KB</a></p>
 <h1>Tags and backup</h1>
+<p class="lede">Tidy your KB's tags and entry titles, see the books you've finished researching, and back it all up.
+  To reorder, rename or merge sub-headings, use <a href="/kb/headings">Sub-headings</a>.</p>
 
 <section class="kb-tidy" id="kb-tidy">
-  <h2>Tidy your tags</h2>
-  <p class="lede">Rename a tag to fix its spelling. Renaming it to a tag you already have merges the two, and the
-    old name is kept as another name for it. Other names (such as <em>Urtica dioica</em> for <em>Nettle</em>)
-    find the tag when you search, browse or type them in a tag field.</p>
-  {% for kind, kind_tags in kinds.items() %}
-  <h3>{{ kind|capitalize }}</h3>
-  {% if kind_tags %}
-  <ul class="tidy-list" data-kind="{{ kind }}"
-      data-lookup="{{ lookup.get(kind, {})|tojson|forceescape }}">
-    {% for t in kind_tags %}
+  <h2>Tags</h2>
+  <p class="small dim">Rename a tag to fix its spelling. Renaming it to a tag you already have merges the two, and the
+    old name is kept as another name for it. Other names (such as <em>Cephalalgia</em> for <em>Headache</em>) find the
+    tag when you search or type them.</p>
+  {% if tags %}
+  <ul class="tidy-list" data-kind="tag" data-lookup="{{ lookup|tojson|forceescape }}">
+    {% for t in tags %}
     <li data-name="{{ t.name }}">
       <div class="tidy-row">
         <a class="tidy-name" href="{{ t.url }}">{{ t.name }}</a>
-        <span class="dim">{{ t.notes }} note{{ 's' if t.notes != 1 }}</span>
+        <span class="dim">{{ t.entries }} entr{{ 'ies' if t.entries != 1 else 'y' }}</span>
         {% for a in t.aliases %}<span class="alias">{{ a }} <button type="button" class="remove-alias" data-alias="{{ a }}" title="Remove &quot;{{ a }}&quot;" aria-label="Remove the other name {{ a }}">×</button></span>{% endfor %}
       </div>
       <details class="tidy-edit">
@@ -35,24 +34,81 @@
     </li>
     {% endfor %}
   </ul>
-  {% else %}<p class="dim small">No {{ kind }} tags yet.</p>{% endif %}
-  {% endfor %}
+  {% else %}<p class="dim small">No tags yet. Add them to an entry on its page, or in <em>Save to KB</em>.</p>{% endif %}
+
+  <h2>Entries</h2>
+  <p class="small dim">Renaming an entry to another entry's title (or one of its other names) merges the two: the text
+    from both goes under one title, and the old title becomes another name for it.</p>
+  {% if entries %}
+  <ul class="tidy-list" id="tidy-entries" data-lookup="{{ entry_lookup|tojson|forceescape }}">
+    {% for e in entries %}
+    <li data-entry-id="{{ e.id }}" data-name="{{ e.title }}">
+      <div class="tidy-row">
+        <a class="tidy-name" href="/kb/entry/{{ e.id }}">{{ e.title }}</a>
+        <span class="dim">{{ e.pieces }} piece{{ 's' if e.pieces != 1 }}</span>
+        {% for a in e.aliases %}<span class="alias">{{ a }} <button type="button" class="remove-alias" data-alias="{{ a }}" title="Remove &quot;{{ a }}&quot;" aria-label="Remove the other name {{ a }}">×</button></span>{% endfor %}
+      </div>
+      <details class="tidy-edit">
+        <summary>Edit</summary>
+        <form class="tidy-form rename-form">
+          <label>Rename to <input name="new_name" value="{{ e.title }}" maxlength="200" required></label>
+          <button type="submit" class="small">Rename</button>
+        </form>
+        <form class="tidy-form alias-form">
+          <label>Add another name <input name="alias" maxlength="200" required placeholder="e.g. Urtica dioica"></label>
+          <button type="submit" class="small">Add</button>
+        </form>
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="dim small">No entries yet.</p>{% endif %}
+</section>
+
+<section class="kb-research" id="kb-research">
+  <h2>Your research</h2>
+  <p class="small dim">Books you've marked <em>Research complete</em> for a search, from the viewer.</p>
+  {% if research %}
+  <ul class="tidy-list research-list">
+    {% for r in research %}
+    <li>
+      <div class="tidy-row">
+        <a class="tidy-name" href="{{ r.url }}">“{{ r.term }}”</a>
+        <span class="dim">{{ r.books|length }} book{{ 's' if r.books|length != 1 }}</span>
+      </div>
+      <ul class="research-books">
+        {% for b in r.books %}
+        <li data-term="{{ r.term }}" data-path="{{ b.path }}">
+          {% if b.url %}<a href="{{ b.url }}">{{ b.title }}</a>{% else %}<span>{{ b.title }}</span>{% endif %}
+          <span class="dim small">{{ b.topic }}{{ ' · ' if b.topic }}done {{ b.done }}</span>
+          {% if b.missing %}<span class="tag ocr" title="This book isn't in the library now">book missing</span>{% endif %}
+          <button type="button" class="link-button small undo-research" aria-label="Undo research complete for {{ b.title }}">Undo</button>
+        </li>
+        {% endfor %}
+      </ul>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="dim small">None yet. Open a book from a search and press <em>Research complete</em> when you've finished with it.</p>{% endif %}
 </section>
 
 <section class="kb-backup">
   <h2>Back up your KB</h2>
-  <p>Your notes are your own work, and unlike the search index they can't be rebuilt from your books. They're kept in
+  <p>Your KB is your own work, and unlike the search index it can't be rebuilt from your books. It's kept in
     <code>{{ notes_path }}</code>: include that file in your backups.</p>
   {% if total %}
   <p class="backup-links">
-    <a class="button" href="/kb/export?format=json" download>Download a backup (JSON)</a>
-    <a class="button" href="/kb/export?format=md" download>Download as Markdown</a>
+    <a class="btn" href="/kb/export?format=json" download>Download a backup (JSON)</a>
+    <a class="btn" href="/kb/export?format=md" download>Markdown, book text marked</a>
+    <a class="btn" href="/kb/export?format=md&amp;book=omit" download>Markdown, book text left out</a>
   </p>
   <p class="dim small">The JSON file has everything, and can be restored with
-    <code>book-searchie notes import FILE</code>. The Markdown file is for reading, printing or using elsewhere.
+    <code>book-searchie notes import FILE</code>. The Markdown download is a zip with one file per entry and its
+    sub-headings as headings: a first draft for a website or book. Text you saved from a book is either marked, so you
+    can see what still needs rewriting in your own words, or left out.
     From the command line: <code>book-searchie notes export backup.json</code>, or
-    <code>book-searchie notes export --format md --per-tag FOLDER</code> for one file per tag.</p>
-  {% else %}<p class="dim">There are no notes to back up yet.</p>{% endif %}
+    <code>book-searchie notes export --format md FOLDER</code> (add <code>--book-text omit</code> to leave it out).</p>
+  {% else %}<p class="dim">There's nothing in your KB to back up yet.</p>{% endif %}
 </section>
 {% endblock %}
 {% block scripts %}<script src="/static/kb_page.js?v={{ static_version }}"></script>{% endblock %}

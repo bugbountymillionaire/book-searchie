@@ -14,7 +14,7 @@ from html import escape
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import markdown
+from .. import ai, markdown
 from ..config import Config
 from ..db import Database
 from ..entries import Entry, EntryHit, EntryInvalid, EntrySummary, Piece
@@ -301,6 +301,22 @@ def add_entries_routes(
         with open_notes(create=False) as store:
             entry_or_404(store, entry_id)
             return {"tags": checked(lambda: store.set_entry_tags(entry_id, data.tags))}
+
+    @app.post("/api/entries/{entry_id}/suggest-tags")
+    def suggest_tags(entry_id: int, x_book_searchie: str | None = Header(default=None)):
+        """Tags a local AI model suggests for an entry, from its title and text. Only ever
+        suggestions: nothing is added until you pick one."""
+        require_app_header(x_book_searchie)
+        if not config.ai_enabled:
+            raise HTTPException(404, "AI tag suggestions are off. Turn them on with [ai] enabled = true in the config.")
+        with open_notes(create=False) as store:
+            entry = entry_or_404(store, entry_id)
+            text = "\n\n".join(f"{s.heading}:\n" + "\n\n".join(p.body for p in s.pieces) for s in entry.sections)
+            try:
+                found = ai.suggest_entry_tags(config, store, title=entry.title, text=text, current=entry.tags)
+            except ai.AiUnavailable as e:
+                raise HTTPException(503, str(e)) from None
+        return {"suggestions": [{"name": s.name, "existing": s.existing} for s in found]}
 
     @app.post("/api/entries/{entry_id}/aliases")
     def add_alias(entry_id: int, data: AliasIn, x_book_searchie: str | None = Header(default=None)):

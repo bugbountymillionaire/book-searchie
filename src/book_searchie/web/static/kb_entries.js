@@ -106,6 +106,7 @@
     });
     wireList();
     markSearchWords();
+    showSuggestions();
     window.scrollTo(0, y);
   }
   async function change(action) {
@@ -210,9 +211,25 @@
       if (alias) change(() => send("POST", `/api/entries/${entryId}/aliases`, { alias }));
     } else if (act === "remove-alias") {
       change(() => send("DELETE", `/api/entries/aliases?${new URLSearchParams({ alias: button.dataset.alias })}`));
-    } else if (act === "add-tag" || act === "remove-tag") {
+    } else if (act === "suggest-tags") {
+      // Ask the local AI model; its tags are only offered, as buttons to add one at a time.
+      const box = $("kb-suggested");
+      button.disabled = true;
+      box.hidden = false;
+      box.textContent = "Asking your AI model…";
+      send("POST", `/api/entries/${entryId}/suggest-tags`)
+        .then(({ suggestions }) => {
+          suggested = { entryId, suggestions };
+          showSuggestions();
+          if (!suggestions.length) box.textContent = "No suggestions for this entry.";
+        })
+        .catch((err) => (box.textContent = err.message))
+        .finally(() => (button.disabled = false));
+    } else if (act === "add-tag" || act === "remove-tag" || act === "add-suggested") {
       const tags = Array.from(entry.querySelectorAll("[data-act=remove-tag]")).map((b) => b.dataset.tag);
-      if (act === "add-tag") {
+      if (act === "add-suggested") {
+        tags.push(button.dataset.tag);
+      } else if (act === "add-tag") {
         const tag = (prompt(`Tag ${title} with, e.g. Headache:`) || "").trim();
         if (!tag) return;
         tags.push(tag);
@@ -250,6 +267,29 @@
       change(() => send("DELETE", `/api/pieces/${pieceId}`));
     }
   });
+
+  // AI tag suggestions for the open entry, kept while you add them one at a time.
+  let suggested = null;
+  function showSuggestions() {
+    const box = $("kb-suggested");
+    const entry = $("kb-entry");
+    if (!box || !suggested || entry.dataset.entryId !== suggested.entryId) return;
+    const have = new Set(Array.from(entry.querySelectorAll("[data-act=remove-tag]")).map((b) => b.dataset.tag.toLowerCase()));
+    const left = suggested.suggestions.filter((s) => !have.has(s.name.toLowerCase()));
+    box.textContent = "";
+    box.hidden = false;
+    if (!left.length) return;
+    box.append(el("span", { className: "dim", textContent: "Suggested: " }));
+    for (const s of left) {
+      const chip = el("button", {
+        type: "button", className: "chip small" + (s.existing ? "" : " new"), textContent: `+ ${s.name}`,
+        title: s.existing ? "A tag you already use" : "A new tag",
+      });
+      chip.dataset.act = "add-suggested";
+      chip.dataset.tag = s.name;
+      box.append(chip);
+    }
+  }
 
   // --- Going to a sub-heading, and the searched-for words -------------------------------
   function openTarget() {

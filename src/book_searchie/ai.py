@@ -15,6 +15,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from .config import Config
+from .entries import ENTRY_TAG_KIND
 from .notes import TAG_MAX, NotesStore
 
 MAX_SUGGESTIONS = 8
@@ -143,4 +144,56 @@ def suggest_tags(
         seen.add(key)
         suggestions.append(Suggestion(kind, name, main is not None))
     suggestions.sort(key=lambda s: not s.existing)  # tags you already use first
+    return suggestions[:MAX_SUGGESTIONS]
+
+
+# --- Entries ------------------------------------------------------------------------
+
+_ENTRY_SYSTEM = """You suggest tags for an entry in someone's personal knowledge base, such as a plant.
+Tags say what the entry is useful for or related to, such as conditions it helps with.
+Prefer tags from the existing list when they fit; only suggest a new tag when none fits.
+Suggest at most {most} tags, only ones clearly supported by the entry's text. Tags are short (one to three words).
+Reply with JSON only, in this form: {{"tags": ["<tag>", "<tag>"]}}"""
+
+
+def suggest_entry_tags(
+    config: Config,
+    store: NotesStore,
+    *,
+    title: str,
+    text: str,
+    current: list[str] = (),
+) -> list[Suggestion]:
+    """Tags the model suggests for an entry, from its title and text, tags already used in
+    the KB first. Tags the entry already has aren't suggested again. Each Suggestion's kind
+    is "tag", as entries have one plain list of tags."""
+    if not config.ai_enabled:
+        raise AiUnavailable("AI tag suggestions are off. Turn them on with [ai] enabled = true in the config.")
+    if not text.strip():
+        return []
+    existing = [name for name, _, _ in sorted(store.entry_tag_counts(), key=lambda t: -t[1])[:MAX_EXISTING]]
+    prompt = (f"Existing tags: {', '.join(existing) if existing else '(none yet)'}\n\n"
+              f"The entry: {title.strip()}\n\n{text.strip()[:MAX_NOTE_CHARS]}")
+    content = _ask(config, _ENTRY_SYSTEM.format(most=MAX_SUGGESTIONS), prompt)
+    try:
+        data = json.loads(content)
+    except ValueError:
+        raise AiUnavailable("The AI model didn't answer in the expected form. Try again.") from None
+    items = data.get("tags", []) if isinstance(data, dict) else data if isinstance(data, list) else []
+
+    have = {t.casefold() for t in current}
+    seen: set[str] = set()
+    suggestions: list[Suggestion] = []
+    for item in items:
+        name = item.get("name", "") if isinstance(item, dict) else item
+        name = " ".join(str(name).split())
+        if not name or len(name) > TAG_MAX:
+            continue
+        main = store.resolve_tag(ENTRY_TAG_KIND, name)  # its own spelling, or an alias's tag
+        name = main or name
+        if name.casefold() in seen or name.casefold() in have:
+            continue
+        seen.add(name.casefold())
+        suggestions.append(Suggestion(ENTRY_TAG_KIND, name, main is not None))
+    suggestions.sort(key=lambda s: not s.existing)
     return suggestions[:MAX_SUGGESTIONS]

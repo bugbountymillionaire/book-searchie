@@ -23,7 +23,9 @@
       {% for t in e.tags %}<span class="kb-name tag-name"><a href="/kb?{{ {'tag': t}|urlencode }}">{{ t }}</a><button type="button" class="kb-x" data-act="remove-tag" data-tag="{{ t }}" aria-label="Remove the tag {{ t }}" title="Remove">×</button></span>{% endfor %}
       {% if not e.tags %}<span class="dim">none</span>{% endif %}
       <button type="button" class="link-button small" data-act="add-tag">+ tag</button>
+      {% if ai_enabled and current.sections %}<button type="button" class="link-button small" data-act="suggest-tags" title="Ask your local AI model for tags that fit this entry's text">Suggest tags</button>{% endif %}
     </p>
+    <p class="kb-suggested" id="kb-suggested" hidden></p>
   </div>
 
   {% if not current.sections %}

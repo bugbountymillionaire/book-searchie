@@ -1,14 +1,17 @@
-"""Tidying tags, other names for tags, exporting and restoring the KB (KB step 7)."""
+"""Tidying tags and entries, other names, the research list, exporting and restoring the KB."""
 
+import io
 import json
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
 
 from book_searchie.cli import main
+from book_searchie.entries import Piece
 from book_searchie.indexer import run_index
 from book_searchie.notes import Note, NoteInvalid, NotesStore, Tag
-from book_searchie.notes_backup import RestoreError, export_json, export_markdown, export_markdown_per_tag, restore
+from book_searchie.notes_backup import RestoreError, export_json, export_markdown_per_entry, restore
 from book_searchie.web.app import create_app
 
 H = {"X-Book-Searchie": "1"}
@@ -134,84 +137,128 @@ def test_a_tag_with_aliases_outlives_its_notes(store):
 
 
 def sample(store, db):
+    """Three entries: text from a book, from another source and your own, with tags, other
+    names, a research record and a sub-heading of your own."""
     culpeper = db.conn.execute("SELECT path FROM files WHERE title = 'Culpeper'").fetchone()[0]
-    book = store.create(Note(source_type="book", topic="Herbalism", path=culpeper, seq=1, label="2",
-                             book_title="Culpeper", quote="The root of black cohosh\nis bitter.",
-                             tags=[Tag("plant", "Black cohosh")]))
-    other = store.create(Note(source_type="other", topic="Herbalism", title="Nettle soup", source_ref="Walk",
-                              source_url="https://example.org/walk", body="- gloves\n- scissors",
-                              tags=[Tag("plant", "Nettle"), Tag("use", "Food")]))
-    mine = store.create(own("Untagged thought"))
-    store.add_alias("plant", "Nettle", "Urtica dioica")
-    return book, other, mine
+    store.add_text("Black cohosh", "The root of black cohosh\nis bitter.",
+                   Piece(body="x", path=culpeper, seq=1, label="2", book_title="Culpeper", topic="Herbalism"))
+    store.add_text("Nettle", "# Soup\n- gloves\n- scissors",
+                   Piece(body="x", source_ref="Walk", source_url="https://example.org/walk", topic="Herbalism"))
+    store.add_text("Nettle", "# Tea\nMy own way: steep for ten minutes.")
+    store.add_text("Untagged thought", "Just an idea.")
+    nettle = store.find_entry("Nettle")
+    store.set_entry_tags(nettle.id, ["Food", "Hay fever"])
+    store.add_entry_alias(nettle.id, "Urtica dioica")
+    store.add_alias("tag", "Hay fever", "Allergic rhinitis")
+    store.set_researched("Nettle", culpeper, True, book_title="Culpeper", topic="Herbalism")
+    store.reorder_headings(["Tea", "Description"])
+    return culpeper
 
 
 def test_export_json_has_everything(store, db, config):
     run_index(config, db)
-    book, other, mine = sample(store, db)
+    culpeper = sample(store, db)
     data = export_json(store)
-    assert (data["format"], data["version"]) == ("book-searchie-notes", 1)
-    by_id = {n["id"]: n for n in data["notes"]}
-    assert by_id[book.id]["source"] == {"path": book.path, "seq": 1, "label": "2", "book_title": "Culpeper",
-                                        "href": None, "missing": False}
-    assert by_id[other.id]["source"] == {"ref": "Walk", "url": "https://example.org/walk"}
-    assert "source" not in by_id[mine.id]
-    assert by_id[other.id]["tags"] == [{"kind": "plant", "name": "Nettle"}, {"kind": "use", "name": "Food"}]
-    assert data["aliases"] == [{"kind": "plant", "tag": "Nettle", "alias": "Urtica dioica"}]
+    assert (data["format"], data["version"]) == ("book-searchie-notes", 2)
+    assert data["headings"][:2] == ["Tea", "Description"] and "Soup" in data["headings"]
+    by_title = {e["title"]: e for e in data["entries"]}
+    assert list(by_title) == ["Black cohosh", "Nettle", "Untagged thought"]
+    [book] = by_title["Black cohosh"]["sections"][0]["pieces"]
+    assert book["source"] == {"path": culpeper, "seq": 1, "label": "2", "book_title": "Culpeper", "href": None,
+                              "missing": False}
+    assert book["source_type"] == "book" and book["topic"] == "Herbalism"
+    nettle = by_title["Nettle"]
+    assert (nettle["aliases"], nettle["tags"]) == (["Urtica dioica"], ["Food", "Hay fever"])
+    assert [s["heading"] for s in nettle["sections"]] == ["Tea", "Soup"]  # the list's order
+    assert nettle["sections"][1]["pieces"][0]["source"] == {"ref": "Walk", "url": "https://example.org/walk"}
+    assert "source" not in nettle["sections"][0]["pieces"][0]
+    assert {"kind": "tag", "tag": "Hay fever", "alias": "Allergic rhinitis"} in data["aliases"]
+    assert data["research"] == [{"term": "nettle", "path": culpeper, "book_title": "Culpeper", "topic": "Herbalism",
+                                 "done": data["research"][0]["done"], "missing": False}]
 
 
-def test_export_markdown(store, db, config):
+def test_markdown_per_entry(store, db, config):
     run_index(config, db)
     sample(store, db)
-    md = export_markdown(store)
-    assert md.startswith("# KB notes\n\n3 notes, exported from Book-Searchie on ")
-    assert "## The root of black cohosh is bitter.\n\n**Book:** Culpeper, p. 2 · Herbalism\n\n> The root of black cohosh\n> is bitter." in md
-    assert "**Other source:** [Walk](https://example.org/walk) · Herbalism" in md
-    assert "- gloves\n- scissors" in md and "Tags: plant: Nettle; use: Food" in md
-    assert "**Own knowledge** · Herbalism" in md
+    store.add_text('Tea/tisane: "hot"', "x")
+    files = export_markdown_per_entry(store)
+    assert sorted(files) == ["Black cohosh.md", "Nettle.md", "Tea_tisane_ _hot_.md", "Untagged thought.md"]
+    assert files["Nettle.md"] == (
+        "# Nettle\n\nAlso called: Urtica dioica\n\nTags: Food, Hay fever\n\n"
+        "## Tea\n\nMy own way: steep for ten minutes.\n\n"
+        "## Soup\n\n*Source: [Walk](https://example.org/walk)*\n\n- gloves\n- scissors\n")
+    assert files["Black cohosh.md"] == (
+        "# Black cohosh\n\n## Description\n\n"
+        "*From Culpeper, p. 2: book text, to rewrite in your own words before publishing.*\n\n"
+        "The root of black cohosh\nis bitter.\n")
+    left_out = export_markdown_per_entry(store, "omit")
+    assert left_out["Black cohosh.md"] == "# Black cohosh\n\n*1 piece of book text left out.*\n"
+    assert left_out["Nettle.md"] == files["Nettle.md"]
+    with pytest.raises(ValueError):
+        export_markdown_per_entry(store, "keep")
 
 
-def test_export_markdown_per_tag(store, db, config):
-    run_index(config, db)
-    sample(store, db)
-    store.create(own("Odd", ("use", 'Tea/tisane: "hot"')))
-    files = export_markdown_per_tag(store)
-    assert sorted(files) == ["plant/Black cohosh.md", "plant/Nettle.md", "untagged.md", "use/Food.md",
-                             "use/Tea_tisane_ _hot_.md"]
-    assert files["plant/Nettle.md"].startswith("# Nettle (plant), also called Urtica dioica\n\n1 note,")
-    assert "Untagged thought" in files["untagged.md"]
+def test_file_names_that_clash_are_numbered(store):
+    store.add_text("A/B", "x")
+    store.add_text("A_B", "y")
+    assert sorted(export_markdown_per_entry(store)) == ["A_B (2).md", "A_B.md"]
 
 
 # --- restore ---
 
 
+def entries_of(store):
+    return [(e.id, e.title, e.aliases, e.tags, e.created, e.updated,
+             [(s.heading, [(p.id, p.body, p.source_type, p.path, p.seq, p.source_url, p.created) for p in s.pieces])
+              for s in e.sections]) for e in store.all_entries()]
+
+
 def test_restore_round_trip(store, db, config, tmp_path):
     run_index(config, db)
-    sample(store, db)
+    culpeper = sample(store, db)
     data = json.loads(json.dumps(export_json(store)))
-    before = [(n.id, n.title, n.tags, n.path, n.source_url, n.created, n.updated) for n in store.all_notes()]
+    before = entries_of(store)
 
     with NotesStore.open(tmp_path / "restored.db") as fresh:
         assert restore(fresh, data) == 3
-        after = [(n.id, n.title, n.tags, n.path, n.source_url, n.created, n.updated) for n in fresh.all_notes()]
-        assert after == before
-        assert fresh.resolve_tag("plant", "urtica dioica") == "Nettle"
-        assert len(fresh.search("urtica")) == 1 and len(fresh.search("cohosh")) == 1
-        new = fresh.create(own("After restore"))
-        assert new.id == max(n[0] for n in before) + 1
+        assert entries_of(fresh) == before
+        assert fresh.headings == store.headings
+        assert fresh.resolve_tag("tag", "allergic rhinitis") == "Hay fever"
+        assert fresh.researched_paths("nettle") == {culpeper}
+        found, _ = fresh.search_entries("urtica")
+        assert [h.entry.title for h in found] == ["Nettle"]
+        assert [h.entry.title for h in fresh.search_entries("rhinitis")[0]] == ["Nettle"]  # tags' other names
+        assert [h.entry.title for h in fresh.search_entries("bitter")[0]] == ["Black cohosh"]
+        piece, _ = fresh.add_text("Nettle", "More.")
+        assert piece[0].id == max(p[0] for e in before for s in e[6] for p in s[1]) + 1
 
 
-def test_restore_refuses_a_kb_with_notes_unless_replacing(store, db, config):
+def test_restore_a_version_1_backup_makes_entries(store, tmp_path):
+    data = {"format": "book-searchie-notes", "version": 1, "aliases": [], "notes": [
+        {"id": 4, "source_type": "own", "topic": "Herbalism", "title": "Nettle soup", "body": "Pick the tops.",
+         "tags": [], "created": "2026-10-01T10:00:00+00:00", "updated": "2026-10-01T10:00:00+00:00"}]}
+    with NotesStore.open(tmp_path / "v1.db") as fresh:
+        assert restore(fresh, data) == 1
+        [entry] = fresh.all_entries()
+        assert entry.title == "Nettle soup" and entry.sections[0].heading == "Notes"
+        assert "Pick the tops." in entry.sections[0].pieces[0].body
+        assert fresh.headings[0] == "Description"
+
+
+def test_restore_refuses_a_kb_with_entries_unless_replacing(store, db, config):
     run_index(config, db)
     sample(store, db)
     data = export_json(store)
-    store.create(own("Only here"))
-    with pytest.raises(RestoreError, match="already has 4 notes"):
+    store.add_text("Only here", "x")
+    with pytest.raises(RestoreError, match="already has 4 entries"):
         restore(store, data)
     assert restore(store, data, replace=True, notes_path=config.notes_path) == 3
-    assert [n.title for n in store.all_notes() if n.title == "Only here"] == []
+    assert store.find_entry("Only here") is None
     copies = list(config.notes_path.parent.glob(f"{config.notes_path.name}.before-restore-*.bak"))
-    assert len(copies) == 1  # the notes it replaced were saved first
+    assert len(copies) == 1  # what it replaced was saved first
+
+
+V2 = {"format": "book-searchie-notes", "version": 2}
 
 
 @pytest.mark.parametrize(
@@ -222,16 +269,19 @@ def test_restore_refuses_a_kb_with_notes_unless_replacing(store, db, config):
         ({"format": "book-searchie-notes", "version": 99, "notes": []}, "newer version"),
         ({"format": "book-searchie-notes", "version": 1, "notes": [{"source_type": "own", "topic": "x"}]},
          "Note 1 in the backup can't be restored"),
-        ({"format": "book-searchie-notes", "version": 1, "notes": [
-            {"id": 1, "source_type": "own", "topic": "x", "title": "a", "body": "b"},
-            {"id": 1, "source_type": "own", "topic": "x", "title": "c", "body": "d"}]}, "Nothing was changed"),
+        ({**V2, "entries": [{"id": 1}]}, "Entry 1 in the backup can't be restored"),
+        ({**V2, "entries": [{"title": "A", "sections": [{"heading": "Tea", "pieces": [{"body": " "}]}]}]},
+         "Entry 1 in the backup can't be restored"),
+        ({**V2, "entries": [{"title": "A", "sections": [{"heading": "Tea", "pieces": [
+            {"body": "x", "source_type": "book"}]}]}]}, "doesn't match its type"),
+        ({**V2, "entries": [{"id": 1, "title": "A"}, {"id": 1, "title": "B"}]}, "Nothing was changed"),
     ],
 )
 def test_bad_backups(store, data, message):
-    store.create(own("Keep me"))
+    store.add_text("Keep me", "x")
     with pytest.raises(RestoreError, match=message):
         restore(store, data, replace=True)
-    assert [n.title for n in store.all_notes()] == ["Keep me"]
+    assert [e.title for e in store.all_entries()] == ["Keep me"]
 
 
 # --- the command line ---
@@ -247,18 +297,20 @@ def test_cli_export_and_import(store, db, config, tmp_path, capsys, monkeypatch)
     monkeypatch.delenv("BOOK_SEARCHIE_NOTES", raising=False)
 
     assert main(["--config", str(cfg), "notes", "export", str(tmp_path / "b.json")]) == 0
-    assert json.loads((tmp_path / "b.json").read_text(encoding="utf-8"))["format"] == "book-searchie-notes"
-    assert main(["--config", str(cfg), "notes", "export", "--format", "md", "--per-tag", str(tmp_path / "md")]) == 0
-    assert (tmp_path / "md" / "plant" / "Nettle.md").is_file()
-    assert main(["--config", str(cfg), "notes", "export", "--per-tag", str(tmp_path / "x")]) == 2  # json can't
+    assert json.loads((tmp_path / "b.json").read_text(encoding="utf-8"))["version"] == 2
+    assert main(["--config", str(cfg), "notes", "export", "--format", "md", str(tmp_path / "md")]) == 0
+    assert "*From Culpeper" in (tmp_path / "md" / "Black cohosh.md").read_text(encoding="utf-8")
+    assert main(["--config", str(cfg), "notes", "export", "-f", "md", "--book-text", "omit", str(tmp_path / "md2")]) == 0
+    assert "left out" in (tmp_path / "md2" / "Black cohosh.md").read_text(encoding="utf-8")
+    assert main(["--config", str(cfg), "notes", "export", "--format", "md", "-"]) == 2  # a folder is needed
     capsys.readouterr()
-    assert main(["--config", str(cfg), "notes", "export", "--format", "md", "-"]) == 0
-    assert capsys.readouterr().out.startswith("# KB notes")
+    assert main(["--config", str(cfg), "notes", "export", "-"]) == 0
+    assert json.loads(capsys.readouterr().out)["format"] == "book-searchie-notes"
 
     assert main(["--config", str(cfg), "notes", "import", str(tmp_path / "b.json")]) == 2  # KB isn't empty
     assert "--replace" in capsys.readouterr().err
     assert main(["--config", str(cfg), "notes", "import", "--replace", str(tmp_path / "b.json")]) == 0
-    assert "Restored 3 notes, replacing 3" in capsys.readouterr().out
+    assert "Restored 3 entries, replacing 3" in capsys.readouterr().out
     (tmp_path / "bad.json").write_text("not json", encoding="utf-8")
     assert main(["--config", str(cfg), "notes", "import", str(tmp_path / "bad.json")]) == 2
 
@@ -274,49 +326,68 @@ def client(config, db):
 
 
 def test_tags_page(client, store, db):
-    sample(store, db)
+    culpeper = sample(store, db)
     page = client.get("/kb/tags").text
-    assert "Tidy your tags" in page and "Back up your KB" in page
-    assert '<a class="tidy-name" href="/kb/tag/plant/Nettle">Nettle</a>' in page
-    assert 'data-alias="Urtica dioica"' in page
-    assert "&#34;urtica dioica&#34;: &#34;Nettle&#34;" in page  # for the merge warning
-    assert 'href="/kb/export?format=json"' in page
+    assert "<h2>Tags</h2>" in page and "<h2>Entries</h2>" in page and "Your research" in page
+    assert "Back up your KB" in page and 'href="/kb/headings"' in page
+    assert '<a class="tidy-name" href="/kb?tag=Hay+fever">Hay fever</a>' in page
+    assert 'data-alias="Allergic rhinitis"' in page
+    assert "&#34;allergic rhinitis&#34;: &#34;Hay fever&#34;" in page  # for the merge warning
+    nettle = store.find_entry("Nettle")
+    assert f'<a class="tidy-name" href="/kb/entry/{nettle.id}">Nettle</a>' in page
+    assert "&#34;urtica dioica&#34;: &#34;Nettle&#34;" in page and "2 pieces" in page
+    fid = db.conn.execute("SELECT id FROM files WHERE path = ?", (culpeper,)).fetchone()[0]
+    assert '<a class="tidy-name" href="/?q=nettle">“nettle”</a>' in page
+    assert f'<a href="/book/{fid}?q=nettle">Culpeper</a>' in page and "book missing" not in page
+    assert 'href="/kb/export?format=json"' in page and 'href="/kb/export?format=md&amp;book=omit"' in page
     assert 'href="/kb/tags"' in client.get("/kb").text
 
 
-def test_tags_page_without_notes(client):
+def test_tags_page_without_notes(client, config):
     page = client.get("/kb/tags").text
-    assert "There are no notes to back up yet" in page
+    assert "There's nothing in your KB to back up yet" in page and "No tags yet" in page
     assert client.get("/kb/export").status_code == 404
+    assert not config.notes_path.exists()
+
+
+def test_research_missing_book_and_undo(client, store, db, config, library):
+    culpeper = sample(store, db)
+    (library / "Herbalism" / "Culpeper.pdf").unlink()
+    run_index(config, db)
+    assert "book missing" in client.get("/kb/tags").text
+    params = {"term": "Nettle", "path": culpeper}
+    assert client.delete("/api/research", params=params).status_code == 403
+    assert client.delete("/api/research", params=params, headers=H).status_code == 200
+    assert client.delete("/api/research", params=params, headers=H).status_code == 404
+    assert "Your research" in (page := client.get("/kb/tags").text) and "None yet" in page
 
 
 def test_rename_and_alias_api(client, store, db):
     sample(store, db)
-    assert client.post("/api/tags/rename", json={"kind": "plant", "name": "Nettle", "new_name": "x"}).status_code == 403
-    res = client.post("/api/tags/rename", json={"kind": "plant", "name": "Black cohosh", "new_name": "nettle"}, headers=H)
-    assert res.json() == {"kind": "plant", "name": "Nettle", "merged": True}
-    res = client.post("/api/tags/aliases", json={"kind": "plant", "name": "Nettle", "alias": "Stinger"}, headers=H)
-    assert res.json() == {"aliases": ["Black cohosh", "Stinger", "Urtica dioica"]}
-    res = client.post("/api/tags/aliases", json={"kind": "plant", "name": "Nettle", "alias": "nettle"}, headers=H)
-    assert res.status_code == 400 and "already a name" in res.json()["error"]
-    assert client.delete("/api/tags/aliases", params={"kind": "plant", "alias": "Stinger"}).status_code == 403
-    assert client.delete("/api/tags/aliases", params={"kind": "plant", "alias": "Stinger"}, headers=H).status_code == 200
-    assert client.delete("/api/tags/aliases", params={"kind": "plant", "alias": "Stinger"}, headers=H).status_code == 404
-
-
-def test_alias_address_goes_to_the_tag(client, store, db):
-    sample(store, db)
-    res = client.get("/kb/tag/plant/Urtica%20dioica", params={"by": "use"}, follow_redirects=False)
-    assert res.status_code == 307 and res.headers["location"] == "/kb/tag/plant/Nettle?by=use"
-    assert "<h1>Nettle" in client.get("/kb/tag/plant/urtica dioica").text
+    assert client.post("/api/tags/rename", json={"kind": "tag", "name": "Food", "new_name": "x"}).status_code == 403
+    res = client.post("/api/tags/rename", json={"kind": "tag", "name": "Food", "new_name": "hay fever"}, headers=H)
+    assert res.json() == {"kind": "tag", "name": "Hay fever", "merged": True}
+    assert store.find_entry("Nettle").tags == ["Hay fever"]
+    assert [h.entry.title for h in store.search_entries("food")[0]] == ["Nettle"]  # the old name still finds it
+    res = client.post("/api/tags/aliases", json={"kind": "tag", "name": "Hay fever", "alias": "Pollen"}, headers=H)
+    assert res.json() == {"aliases": ["Allergic rhinitis", "Food", "Pollen"]}
+    assert client.delete("/api/tags/aliases", params={"kind": "tag", "alias": "Pollen"}, headers=H).status_code == 200
 
 
 def test_export_downloads(client, store, db):
     sample(store, db)
     res = client.get("/kb/export", params={"format": "json"})
     assert res.headers["content-type"] == "application/json"
-    assert 'attachment; filename="book-searchie-notes-' in res.headers["content-disposition"]
-    assert res.json()["format"] == "book-searchie-notes"
+    assert 'attachment; filename="book-searchie-kb-' in res.headers["content-disposition"]
+    assert res.json()["version"] == 2
     res = client.get("/kb/export", params={"format": "md"})
-    assert res.headers["content-type"].startswith("text/markdown") and res.text.startswith("# KB notes")
+    assert res.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(res.content)) as zf:
+        assert sorted(zf.namelist()) == ["Black cohosh.md", "Nettle.md", "Untagged thought.md"]
+        assert "*From Culpeper" in zf.read("Black cohosh.md").decode("utf-8")
+    res = client.get("/kb/export", params={"format": "md", "book": "omit"})
+    assert "book-text-left-out.zip" in res.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(res.content)) as zf:
+        assert "left out" in zf.read("Black cohosh.md").decode("utf-8")
     assert client.get("/kb/export", params={"format": "pdf"}).status_code == 400
+    assert client.get("/kb/export", params={"format": "md", "book": "keep"}).status_code == 400

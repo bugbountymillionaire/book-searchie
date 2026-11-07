@@ -102,7 +102,8 @@
   });
 })();
 
-// --- Tags and backup page: rename or merge tags, and their other names --------------
+// --- Tags and backup page: rename or merge tags and entries, their other names, and
+// undo research ------------------------------------------------------------------------
 (function () {
   const HEADERS = { "Content-Type": "application/json", "X-Book-Searchie": "1" };
   const section = document.getElementById("kb-tidy");
@@ -120,7 +121,7 @@
     return data;
   }
 
-  section.querySelectorAll(".tidy-list").forEach((list) => {
+  section.querySelectorAll(".tidy-list[data-kind]").forEach((list) => {
     const kind = list.dataset.kind;
     const lookup = JSON.parse(list.dataset.lookup || "{}");
 
@@ -134,7 +135,7 @@
         const existing = lookup[newName.toLowerCase()];
         if (existing && existing !== name &&
             !confirm(`"${existing}" is already a ${kind} tag. Merge "${name}" into it? ` +
-                     `Notes with either tag will have "${existing}", and "${name}" becomes another name for it.`)) return;
+                     `Entries with either tag will have "${existing}", and "${name}" becomes another name for it.`)) return;
         try {
           await send("POST", "/api/tags/rename", { kind, name, new_name: newName });
           location.reload();
@@ -167,4 +168,65 @@
       );
     });
   });
+
+  // Entries: rename (merging into another entry), and other names.
+  const entries = document.getElementById("tidy-entries");
+  if (entries) {
+    const lookup = JSON.parse(entries.dataset.lookup || "{}");
+    entries.querySelectorAll("li[data-entry-id]").forEach((item) => {
+      const id = item.dataset.entryId;
+      const name = item.dataset.name;
+      item.querySelector(".rename-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const title = e.target.elements.new_name.value.replace(/\s+/g, " ").trim();
+        if (!title || title === name) return;
+        const existing = lookup[title.toLowerCase()];
+        if (existing && existing !== name &&
+            !confirm(`"${existing}" is already an entry. Merge "${name}" into it? ` +
+                     `Its text goes under "${existing}", and "${name}" becomes another name for it.`)) return;
+        try {
+          await send("POST", `/api/entries/${id}/rename`, { title });
+          location.reload();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+      item.querySelector(".alias-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+          await send("POST", `/api/entries/${id}/aliases`, { alias: e.target.elements.alias.value });
+          location.reload();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+      item.querySelectorAll(".remove-alias").forEach((button) =>
+        button.addEventListener("click", async () => {
+          const alias = button.dataset.alias;
+          if (!confirm(`Remove "${alias}" as another name for "${name}"?`)) return;
+          try {
+            await send("DELETE", `/api/entries/aliases?${new URLSearchParams({ alias })}`);
+            button.closest(".alias").remove();
+          } catch (err) {
+            alert(err.message);
+          }
+        })
+      );
+    });
+  }
+
+  // Research: undo "Research complete" for a book.
+  document.querySelectorAll(".undo-research").forEach((button) =>
+    button.addEventListener("click", async () => {
+      const row = button.closest("li[data-term]");
+      try {
+        await send("DELETE", `/api/research?${new URLSearchParams({ term: row.dataset.term, path: row.dataset.path })}`);
+        const group = row.closest(".research-list > li");
+        row.remove();
+        if (!group.querySelector("li[data-term]")) group.remove();
+      } catch (err) {
+        alert(err.message);
+      }
+    })
+  );
 })();

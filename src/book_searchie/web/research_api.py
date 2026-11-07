@@ -46,3 +46,12 @@ def add_research_routes(
             if store is not None:
                 store.set_researched(term, row["path"], data.done, book_title=row["title"], topic=row["topic"])
         return {"file_id": data.file_id, "term": term, "done": data.done}
+
+    @app.delete("/api/research")
+    def remove_research(term: str, path: str, x_book_searchie: str | None = Header(default=None)):
+        """Undo a record from the research list, which may be for a book that has gone."""
+        require_app_header(x_book_searchie)
+        with open_notes_for(config, create=False) as store:
+            if store is None or not store.remove_research(term, path):
+                raise HTTPException(404, "That book isn't marked as researched for that search.")
+        return {"deleted": True}

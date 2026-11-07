@@ -73,6 +73,16 @@ class ResearchMixin:
                 self.conn.execute("DELETE FROM research WHERE term = ? AND path = ?", (term, path))
         return done
 
+    def remove_research(self, term: str, path: str) -> bool:
+        """Undo a record, by its term and book path (for books no longer in the library too).
+        Returns False if there was no such record."""
+        try:
+            term = research_term(term)
+        except ResearchInvalid:
+            return False
+        with self.conn:
+            return self.conn.execute("DELETE FROM research WHERE term = ? AND path = ?", (term, path)).rowcount > 0
+
     def researched_paths(self, query: str) -> set[str]:
         """The books marked done for this search."""
         try:
