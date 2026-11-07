@@ -4,16 +4,26 @@ import pytest
 
 from book_searchie import notes as notes_mod
 from book_searchie.config import ConfigError, load_config
-from book_searchie.entries import CONVERTED_HEADING, DEFAULT_HEADINGS, EntryInvalid, Piece
+from book_searchie.entries import CONVERTED_HEADING, FIRST_TOPIC, EntryInvalid, Piece
 from book_searchie.notes import Note, NotesStore, Tag
 from book_searchie.search import QueryError
 
 BOOK = "/lib/Herbalism/Culpeper.epub"
+HERBAL = ["Description", "Identification", "Harvesting", "Tea", "Tincture", "Poultice", "Infused oil", "Cautions"]
+
+
+def seed(store, topics=("", "Herbalism"), names=HERBAL):
+    """Give topics a list of sub-headings, as if they'd been typed. A new KB has none."""
+    with store.conn:
+        for topic in topics:
+            for name in names:
+                store._remember_heading(topic, name)
 
 
 @pytest.fixture
 def store(tmp_path):
     with NotesStore.open(tmp_path / "notes.db") as s:
+        seed(s)
         yield s
 
 
@@ -32,7 +42,7 @@ def test_typing_a_title_makes_the_entry_then_adds_to_it(store):
     assert store.entry_count() == 1
     assert first.entry_id == second.entry_id
     assert (first.entry_title, second.entry_title) == ("Nettle", "Nettle")  # keeps the first spelling
-    assert second.heading == "Tea"  # spelt as the config has it
+    assert second.heading == "Tea"  # spelt as the topic's list has it
     entry = store.find_entry("NETTLE")
     assert entry.headings == ["Description", "Tea"]
     assert [p.body for p in entry.sections[0].pieces] == ["Nettles are so well known."]
@@ -48,7 +58,7 @@ def test_sources_are_worked_out_and_kept(store):
     assert (other.source_type, other.source_ref, other.source_url) == ("other", "Foraging walk",
                                                                        "https://example.org/walk")
     assert (own.source_type, own.path, own.source_ref) == ("own", None, None)
-    # With no sub-heading, text goes under the first one in the config.
+    # With no sub-heading, text goes under the first on the entry's topic list.
     assert {book.heading, other.heading, own.heading} == {"Description"}
     assert [p.position for p in store.find_entry("Nettle").sections[0].pieces] == [0, 1, 2]
 
@@ -90,11 +100,13 @@ def test_new_headings_can_be_typed_and_come_after_the_configured_ones(store):
     assert [p.body for p in entry.sections[2].pieces] == ["Young tops.", "With potatoes."]
 
 
-def test_heading_order_follows_the_store_headings(tmp_path):
-    with NotesStore.open(tmp_path / "n.db", ["Uses", "Description"]) as s:
-        s.add_piece("Nettle", "Description", Piece(body="a"))
+def test_heading_order_follows_the_topic_list(tmp_path):
+    with NotesStore.open(tmp_path / "n.db") as s:
+        seed(s, ["Gardening"], ["Uses", "Description"])
+        s.add_piece("Nettle", "Description", Piece(body="a", topic="Gardening"))
         s.add_piece("Nettle", None, Piece(body="b"))  # the first heading: Uses
         assert s.find_entry("Nettle").headings == ["Uses", "Description"]
+        assert s.find_entry("Nettle").topic == "Gardening"
 
 
 def test_create_entry_with_tags_and_no_text(store):
@@ -370,7 +382,10 @@ def test_upgrading_converts_notes_to_entries(tmp_path):
 
         entry = s.find_entry("NETTLES FOR JOINT ACHES")
         assert entry.headings == [CONVERTED_HEADING]
-        assert s.headings == [*DEFAULT_HEADINGS, CONVERTED_HEADING]  # the config list, then the rest
+        # Its text is from Herbalism and Woodwork, one piece each: the first one's topic wins.
+        assert entry.topic == "Herbalism"
+        assert s.heading_topics() == ["Herbalism"]
+        assert s.headings_for("Herbalism") == [CONVERTED_HEADING]
         first, second = entry.sections[0].pieces
         assert first.body == "An handful of the leaves of green Nettles.\n\nTry it."
         assert (first.source_type, first.path, first.seq, first.label, first.href, first.topic) == (
@@ -388,6 +403,48 @@ def test_upgrading_converts_notes_to_entries(tmp_path):
     with NotesStore.open(path) as s:  # nothing is converted twice
         assert s.conn.execute("SELECT COUNT(*) FROM pieces").fetchone()[0] == 3
         assert s._convert_notes() == 0
+
+
+def test_upgrading_gives_entries_topics_and_each_topic_a_list(tmp_path):
+    path = tmp_path / "notes.db"
+    with NotesStore.open(path) as s:
+        seed(s, ["Herbalism"])
+        s.add_text("Nettle", "# Tea\na", from_book(""))
+        s.add_text("Nettle", "# Soup\nb", Piece(body="", topic="Foraging"))
+        s.add_text("Comfrey", "# Description\nc", from_book(""))
+        s.add_text("Water", "# Method\nd", Piece(body="", topic="Survival"))
+        s.add_text("Water", "# Cautions\ne\n# Kit\nf", Piece(body="", topic="Survival"))
+        s.add_text("Idea", "# Thoughts\ng")
+        # Back to version 5: no topics, and one list of sub-headings.
+        old = ["Description", "Tea", "Cautions", "Soup", "Method", "Kit", "Thoughts"]
+        s.conn.executescript(
+            "ALTER TABLE entries DROP COLUMN topic; DROP TABLE headings;"
+            " CREATE TABLE headings (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE,"
+            " position INTEGER NOT NULL); PRAGMA user_version = 5;")
+        s.conn.executemany("INSERT INTO headings (name, position) VALUES (?, ?)", [(h, i) for i, h in enumerate(old)])
+        s.conn.commit()
+
+    with NotesStore.open(path) as s:
+        assert [(e.title, e.topic) for e in s.all_entries()] == [
+            ("Comfrey", "Herbalism"), ("Idea", ""), ("Nettle", "Herbalism"), ("Water", "Survival")]
+        assert s.headings_for("Herbalism") == old  # the topic most entries are in keeps the whole list
+        assert s.headings_for("Survival") == ["Cautions", "Method", "Kit"]  # in the old list's order
+        assert s.headings_for("") == ["Thoughts"]
+        assert s.headings_for("Foraging") == []  # Nettle's soup text is in Herbalism's Nettle
+    assert (tmp_path / "notes.db.v5.bak").is_file()
+
+
+def test_upgrading_a_kb_with_no_entries_gives_its_list_to_the_first_topic(tmp_path):
+    path = tmp_path / "notes.db"
+    with NotesStore.open(path) as s:
+        s.conn.executescript(
+            "ALTER TABLE entries DROP COLUMN topic; DROP TABLE headings;"
+            " CREATE TABLE headings (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE,"
+            " position INTEGER NOT NULL); INSERT INTO headings (name, position) VALUES ('Description', 0), ('Tea', 1);"
+            " PRAGMA user_version = 5;")
+    with NotesStore.open(path) as s:
+        assert s.heading_topics() == [FIRST_TOPIC]
+        assert s.headings_for(FIRST_TOPIC) == ["Description", "Tea"]
 
 
 def test_a_failed_upgrade_leaves_the_file_as_it_was(tmp_path, monkeypatch):
@@ -411,19 +468,13 @@ def test_a_failed_upgrade_leaves_the_file_as_it_was(tmp_path, monkeypatch):
 # --- config ---
 
 
-def test_headings_config(tmp_path):
+def test_headings_in_the_config_are_no_longer_used(tmp_path):
     cfg = tmp_path / "book-searchie.toml"
-    cfg.write_text('[library]\nroots = ["lib"]\n', encoding="utf-8")
-    assert load_config(cfg).headings == DEFAULT_HEADINGS
-    cfg.write_text('[library]\nroots = ["lib"]\n[notes]\nheadings = ["  Uses ", "Growing  well"]\n', encoding="utf-8")
-    assert load_config(cfg).headings == ["Uses", "Growing well"]
-    for bad, message in [("[]", "at least one"), ('["Tea", "tea"]', "twice"), (f'["{"x" * 81}"]', "at most")]:
-        cfg.write_text(f'[library]\nroots = ["lib"]\n[notes]\nheadings = {bad}\n', encoding="utf-8")
-        with pytest.raises(ConfigError, match=message):
-            load_config(cfg)
+    cfg.write_text('[library]\nroots = ["lib"]\n[notes]\nheadings = ["Uses", "Uses"]\n', encoding="utf-8")
+    assert not hasattr(load_config(cfg), "headings")  # an old config still loads
 
 
-# --- sub-headings typed in the text, and the master list ---
+# --- sub-headings typed in the text, and each topic's list ---
 
 
 def test_split_headings():
@@ -443,11 +494,12 @@ def test_add_text_with_headings(store):
     assert [(p.entry_title, p.heading, p.body, p.source_type) for p in pieces] == [
         ("Nettle", "Description", "Stings.", "book"), ("Nettle", "Tea", "A cup.", "book"),
         ("Nettle", "Hair rinse", "For shine.", "book")]
-    assert store.headings[-1] == "Hair rinse"  # remembered at the end of the list
+    assert store.headings_for("Herbalism")[-1] == "Hair rinse"  # remembered at the end of its topic's list
+    assert "Hair rinse" not in store.headings_for("")
     _, new = store.add_text("Nettle", "# hair RINSE\nAgain.")
     assert not new
     assert store.find_entry("Nettle").headings == ["Description", "Tea", "Hair rinse"]
-    assert store.heading_counts()[-1] == ("Hair rinse", 1)
+    assert store.heading_counts("Herbalism")[-1] == ("Hair rinse", 1)
     with pytest.raises(EntryInvalid, match="no text"):
         store.add_text("Nettle", "# Tea\n")
     with pytest.raises(EntryInvalid, match="at most 80"):
@@ -459,10 +511,11 @@ def test_entries_show_headings_in_the_lists_order(store):
     store.add_text("Nettle", "# Cautions\na\n# Tea\nb\n# Description\nc")
     assert store.find_entry("Nettle").headings == ["Description", "Tea", "Cautions"]
     # Reordering the list (the Sub-headings page, later) reorders every entry.
-    store.conn.execute("UPDATE headings SET position = -1 WHERE name = 'Cautions'")
+    store.conn.execute("UPDATE headings SET position = -1 WHERE name = 'Cautions' AND topic = ''")
     assert store.find_entry("Nettle").headings == ["Cautions", "Description", "Tea"]
     assert store.entry_list()[0].headings == ["Cautions", "Description", "Tea"]
-    assert store.default_heading == "Cautions"
+    assert store.default_heading("") == "Cautions"
+    assert store.default_heading("Herbalism") == "Description"  # another topic's list is its own
 
 
 def test_edit_text(store):
@@ -477,37 +530,86 @@ def test_edit_text(store):
         store.edit_text(piece.id, "# Tea")
 
 
-def test_new_file_heading_list_comes_from_the_config(tmp_path):
-    with NotesStore.open(tmp_path / "n.db", ["Uses", "Growing"]) as s:
-        assert s.headings == ["Uses", "Growing"]
-    with NotesStore.open(tmp_path / "n.db", ["Changed"]) as s:
-        assert s.headings == ["Uses", "Growing"]  # after that, the list is in the KB
+def test_a_new_kb_has_no_sub_headings(tmp_path):
+    with NotesStore.open(tmp_path / "n.db") as s:
+        assert s.heading_topics() == [] and s.default_heading("Survival") is None
+
+
+def test_a_topic_with_no_sub_headings_needs_one_typed(tmp_path):
+    with NotesStore.open(tmp_path / "n.db") as s:
+        seed(s, ["Herbalism"])
+        water = Piece(body="", topic="Survival")
+        with pytest.raises(EntryInvalid, match="Survival has no sub-headings yet"):
+            s.add_text("Water", "Boil it for a minute.", water)
+        with pytest.raises(EntryInvalid, match="no topic have no sub-headings"):
+            s.add_piece("Fire", None, Piece(body="Dry tinder first."))
+        assert s.entry_count() == 0  # nothing half-saved
+
+        # Text before the first # goes under the first one typed, which starts the list.
+        pieces, _ = s.add_text("water", "Boil it for a minute.\n# Method\nRolling boil.\n# Kit\nA billy can.", water)
+        assert [(p.heading, p.body) for p in pieces] == [
+            ("Method", "Boil it for a minute."), ("Method", "Rolling boil."), ("Kit", "A billy can.")]
+        assert s.find_entry("Water").topic == "Survival"
+        assert s.headings_for("Survival") == ["Method", "Kit"]
+        assert s.heading_topics() == ["Herbalism", "Survival"]
+        assert s.headings_for("Herbalism") == HERBAL  # unchanged
+        # Now it has a default, and other topics' sub-headings aren't offered.
+        (piece,), _ = s.add_text("Water", "Filter it first.")
+        assert piece.heading == "Method"
+        (piece,), _ = s.add_text("Water", "# tea\nPine needle.")
+        assert piece.heading == "tea"  # not spelt as Herbalism's Tea
+        assert s.headings_for("Survival") == ["Method", "Kit", "tea"]
+
+
+def test_an_entry_keeps_its_topic_and_can_be_moved(store):
+    store.add_text("Comfrey", "Knitbone.", from_book(""))
+    store.add_text("Comfrey", "# Compost\nCut three times a summer.", Piece(body="", topic="Gardening"))
+    comfrey = store.find_entry("Comfrey")
+    assert comfrey.topic == "Herbalism"  # set when it was made, not by later text
+    assert store.headings_for("Herbalism")[-1] == "Compost"
+    assert store.headings_for("Gardening") == []
+
+    entry = store.create_entry("Potatoes", topic="Gardening")
+    assert entry.topic == "Gardening" and store.entry_summary(entry.id).topic == "Gardening"
+
+    assert store.set_entry_topic(comfrey.id, " Gardening ") == "Gardening"
+    assert store.headings_for("Gardening") == ["Description", "Compost"]  # its sub-headings come too
+    assert store.find_entry("Comfrey").topic == "Gardening"
+    with pytest.raises(EntryInvalid, match="no such entry"):
+        store.set_entry_topic(999, "Gardening")
+
+    # Text moved to a new entry: the new entry is in the old one's topic.
+    piece = store.find_entry("Comfrey").sections[1].pieces[0]
+    store.move_piece(piece.id, title="Compost heap")
+    assert store.find_entry("Compost heap").topic == "Gardening"
 
 
 def test_reorder_rename_and_remove_headings(store):
     store.add_text("Nettle", "# Infusion\na\n# Tea\nb")
     store.add_text("Yarrow", "# Infusion\nc")
 
-    assert store.reorder_headings(["tea", "Cautions", "nonsense", "Tea"])[:3] == ["Tea", "Cautions", "Description"]
+    assert store.reorder_headings("", ["tea", "Cautions", "nonsense", "Tea"])[:3] == ["Tea", "Cautions", "Description"]
+    assert store.headings_for("Herbalism")[:2] == ["Description", "Identification"]  # only that topic's
     assert store.find_entry("Nettle").headings == ["Tea", "Infusion"]
 
     # Renaming to a new name keeps its place on the list.
-    assert store.rename_heading("infusion", "Tisane") == ("Tisane", False)
-    assert store.headings[-1] == "Tisane"
+    assert store.rename_heading("", "infusion", "Tisane") == ("Tisane", False)
+    assert store.headings_for("")[-1] == "Tisane"
     assert store.find_entry("Yarrow").headings == ["Tisane"]
     assert store.search_entries("tisane")[1] == 2
 
     # Renaming onto one on the list merges them in every entry.
-    assert store.rename_heading("Tisane", "tea") == ("Tea", True)
-    assert "Tisane" not in store.headings
+    assert store.rename_heading("", "Tisane", "tea") == ("Tea", True)
+    assert "Tisane" not in store.headings_for("")
     nettle = store.find_entry("Nettle")
     assert [(s.heading, [p.body for p in s.pieces]) for s in nettle.sections] == [("Tea", ["b", "a"])]
     assert store.find_entry("Yarrow").headings == ["Tea"]
     with pytest.raises(EntryInvalid, match="no sub-heading"):
-        store.rename_heading("Nope", "x")
+        store.rename_heading("", "Nope", "x")
 
     with pytest.raises(EntryInvalid, match="2 entries use"):
-        store.remove_heading("Tea")
-    assert store.remove_heading("cautions")
-    assert not store.remove_heading("Cautions")
-    assert "Cautions" not in store.headings
+        store.remove_heading("", "Tea")
+    assert store.remove_heading("", "cautions")
+    assert not store.remove_heading("", "Cautions")
+    assert "Cautions" not in store.headings_for("")
+    assert "Cautions" in store.headings_for("Herbalism")

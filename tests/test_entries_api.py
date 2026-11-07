@@ -28,7 +28,7 @@ def add(client, **kw):
     return {**data["pieces"][0], "new_entry": data["new_entry"]}
 
 
-def test_saving_from_a_book_makes_then_adds_to_the_entry(client, db, config):
+def test_saving_from_a_book_makes_then_adds_to_the_entry(client, db, config, kb):
     fid = file_id(db, "Culpeper")
     first = add(client, title="Nettle", heading="tea", body="The root of black cohosh is **bitter**.",
                 file_id=fid, seq=1)
@@ -42,11 +42,11 @@ def test_saving_from_a_book_makes_then_adds_to_the_entry(client, db, config):
 
     second = add(client, title="nettle", body="My own words.")
     assert not second["new_entry"] and second["entry_id"] == first["entry_id"]
-    assert second["heading"] == "Description"  # the first in the config
+    assert second["heading"] == "Description"  # the first on the entry's topic list
     assert second["source"] == {"type": "own"}
 
 
-def test_epub_pieces_keep_the_chapter(client, db, config):
+def test_epub_pieces_keep_the_chapter(client, db, config, kb):
     fid = file_id(db, "Modern Herbal")
     piece = add(client, title="Nettle", body="Nettle leaves sting.", file_id=fid, seq=1)
     assert piece["source"]["label"] == "TOC Leaves" and piece["source"]["chapter"]
@@ -54,7 +54,7 @@ def test_epub_pieces_keep_the_chapter(client, db, config):
         assert store.get_piece(piece["id"]).href == "OEBPS/text/ch2.xhtml"
 
 
-def test_other_sources_and_bad_requests(client, db):
+def test_other_sources_and_bad_requests(client, db, kb):
     other = add(client, title="Nettle", body="Top leaves only.", source_ref="Foraging walk",
                 source_url="https://example.org/walk")
     assert other["source"] == {"type": "other", "ref": "Foraging walk", "url": "https://example.org/walk"}
@@ -73,7 +73,7 @@ def test_other_sources_and_bad_requests(client, db):
     assert client.post("/api/pieces", json={"title": "Nettle", "body": "x"}).status_code == 403  # no app header
 
 
-def test_a_book_source_cant_be_forged(client, db, config):
+def test_a_book_source_cant_be_forged(client, db, config, kb):
     piece = add(client, title="Nettle", body="x", file_id=file_id(db, "Culpeper"), seq=1,
                 source_ref="ignored", source_url="https://example.org")
     with NotesStore.open(config.notes_path) as store:
@@ -81,7 +81,7 @@ def test_a_book_source_cant_be_forged(client, db, config):
     assert (saved.source_type, saved.source_ref, saved.source_url) == ("book", None, None)
 
 
-def test_list_lookup_titles_and_get(client, db):
+def test_list_lookup_titles_and_get(client, db, kb):
     fid = file_id(db, "Culpeper")
     add(client, title="Nettle", heading="Tea", body="a", file_id=fid, seq=1)
     add(client, title="Nettle", heading="Description", body="b")
@@ -193,7 +193,7 @@ def test_entries_tags_aliases_rename_and_delete(client):
     assert client.get("/api/entries").json()["entries"] == []
 
 
-def test_headings_typed_in_the_text(client, db):
+def test_headings_typed_in_the_text(client, db, kb):
     fid = file_id(db, "Culpeper")
     res = client.post("/api/pieces", json={
         "title": "nettle", "file_id": fid, "seq": 1,
@@ -205,10 +205,13 @@ def test_headings_typed_in_the_text(client, db):
     assert [(p["heading"], p["body"], p["source"]["type"]) for p in data["pieces"]] == [
         ("Description", "Stings.", "book"), ("Tea", "A cup a day.", "book"), ("Hair rinse", "For shine.", "book")]
 
-    # A new heading goes on the end of the master list.
-    names = [h["name"] for h in client.get("/api/headings").json()["headings"]]
+    # A new heading goes on the end of the entry's topic list (the book's topic), and only that one.
+    names = [h["name"] for h in client.get("/api/headings?topic=Herbalism").json()["headings"]]
     assert names[:2] == ["Description", "Identification"] and names[-1] == "Hair rinse"
+    assert "Hair rinse" not in [h["name"] for h in client.get("/api/headings").json()["headings"]]
     assert client.get("/api/entries/lookup?title=nettle").json()["headings"] == names
+    # A title that would make a new entry is offered the given topic's list.
+    assert client.get("/api/entries/lookup?title=Water&topic=Survival").json() == {"entry": None, "headings": []}
 
     # Editing: a # line first moves the text, and further ones add text.
     tea = data["pieces"][1]
@@ -226,11 +229,34 @@ def test_headings_typed_in_the_text(client, db):
 
 
 def test_headings_before_there_is_a_notes_file(client, config):
-    assert [h["name"] for h in client.get("/api/headings").json()["headings"]] == config.headings
+    assert client.get("/api/headings?topic=Herbalism").json() == {"topic": "Herbalism", "topics": [], "headings": []}
     assert not config.notes_path.exists()
 
 
-def test_heading_list_api(client):
+def test_topics_for_new_entries_and_moving_them(client, db):
+    # A topic with no sub-headings yet needs one typed.
+    res = client.post("/api/pieces", json={"title": "Water", "body": "Boil it.", "topic": "Survival"}, headers=H)
+    assert res.status_code == 400 and "Survival has no sub-headings yet" in res.json()["error"]
+    water = add(client, title="Water", body="# Method\nBoil it.", topic="Survival")
+    assert client.get(f"/api/entries/{water['entry_id']}").json()["topic"] == "Survival"
+    assert add(client, title="Water", body="A rolling boil.")["heading"] == "Method"  # now the default
+    assert client.get("/api/headings?topic=survival").json()["headings"] == [{"name": "Method", "entries": 1}]
+    assert "Survival" in client.get("/api/headings").json()["topics"]
+
+    # A book's topic is used when none is given; an entry with no text gets the topic asked for.
+    nettle = add(client, title="Nettle", body="# Tea\nx", file_id=file_id(db, "Culpeper"), seq=1)
+    assert client.get("/api/entries/lookup?title=Nettle").json()["entry"]["topic"] == "Herbalism"
+    made = client.post("/api/entries", json={"title": "Fire", "topic": "Survival"}, headers=H).json()
+    assert made["topic"] == "Survival"
+
+    res = client.put(f"/api/entries/{nettle['entry_id']}/topic", json={"topic": "Foraging"}, headers=H)
+    assert res.json() == {"topic": "Foraging"}
+    assert [h["name"] for h in client.get("/api/headings?topic=Foraging").json()["headings"]] == ["Tea"]
+    assert client.put("/api/entries/999/topic", json={"topic": "x"}, headers=H).status_code == 404
+    assert client.put(f"/api/entries/{nettle['entry_id']}/topic", json={"topic": "x"}).status_code == 403
+
+
+def test_heading_list_api(client, kb):
     add(client, title="Nettle", body="# Infusion\nLeaves.")
     names = lambda: [h["name"] for h in client.get("/api/headings").json()["headings"]]  # noqa: E731
     res = client.put("/api/headings/order", json={"names": ["Infusion", "Tea"]}, headers=H)

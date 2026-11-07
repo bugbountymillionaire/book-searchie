@@ -12,6 +12,7 @@ from book_searchie.config import ConfigError, load_config
 from book_searchie.indexer import run_index
 from book_searchie.notes import Note, NotesStore, Tag
 from book_searchie.web.app import create_app
+from .conftest import seed_headings
 
 H = {"X-Book-Searchie": "1"}
 
@@ -218,6 +219,7 @@ def test_button_only_when_switched_on(client, db, ai_config):
 @pytest.fixture
 def entry_store(ai_config):
     with NotesStore.open(ai_config.notes_path) as s:
+        seed_headings(s)
         s.add_text("Nettle", "Stings.\n# Tea\nFor hay fever and aching joints.")
         s.add_text("Yarrow", "x")
         s.set_entry_tags(s.find_entry("Yarrow").id, ["Joint pain", "Wounds"])

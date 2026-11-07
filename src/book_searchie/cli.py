@@ -122,7 +122,7 @@ def cmd_notes_export(args) -> int:
     if args.format == "md" and args.dest == "-":
         print("error: Markdown is written as one file per entry; give a folder name", file=sys.stderr)
         return 2
-    with NotesStore.open(config.notes_path, config.headings) as store:
+    with NotesStore.open(config.notes_path) as store:
         count = store.entry_count()
         if args.format == "md":
             folder = Path(args.dest)
@@ -157,7 +157,7 @@ def cmd_notes_import(args) -> int:
         print(f"error: {args.file} isn't a JSON backup ({e})", file=sys.stderr)
         return 2
     try:
-        with NotesStore.open(config.notes_path, config.headings) as store:
+        with NotesStore.open(config.notes_path) as store:
             had = store.entry_count()
             restored = restore(store, data, replace=args.replace, notes_path=config.notes_path)
     except (RestoreError, NotesError) as e:

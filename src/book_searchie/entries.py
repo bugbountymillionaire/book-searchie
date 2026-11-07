@@ -1,8 +1,13 @@
 """KB entries: what the KB is built from, from notes version 3 on.
 
 An entry has a title (Nettle), any number of other names (Urtica dioica), tags on the
-title (Headache, Hay fever), and sub-headings (Description, Tea, Tincture). Each
-sub-heading holds pieces of text in the order they were saved.
+title (Headache, Hay fever), a topic (Herbalism: a top-level library folder), and
+sub-headings (Description, Tea, Tincture). Each sub-heading holds pieces of text in the
+order they were saved.
+
+Each topic has its own ordered list of sub-headings (from notes version 6), so Survival
+entries aren't offered Tincture. A topic's list starts empty and grows as sub-headings are
+typed; the first on it is where text goes when no sub-heading is given.
 
 A piece keeps where it came from, but that's never shown: it's only used to list
 what was saved from a page, link back to the book, and spot book text before
@@ -27,9 +32,9 @@ from urllib.parse import urlsplit
 from .search import QueryError, prepare_query
 
 ENTRY_TAG_KIND = "tag"
-DEFAULT_HEADINGS = [
-    "Description", "Identification", "Harvesting", "Tea", "Tincture", "Poultice", "Infused oil", "Cautions",
-]
+# When upgrading a KB with no entries, the one list of sub-headings there was (herbal, to
+# start with) goes to this topic. With entries, it goes to the topic most of them are in.
+FIRST_TOPIC = "Herbalism"
 # Converted notes go under this sub-heading.
 CONVERTED_HEADING = "Notes"
 
@@ -107,6 +112,14 @@ HEADINGS_SCHEMA = """CREATE TABLE headings (
     name TEXT NOT NULL UNIQUE COLLATE NOCASE,
     position INTEGER NOT NULL
 )"""
+# From notes version 6: a list of sub-headings per topic. '' is for entries with no topic.
+TOPIC_HEADINGS_SCHEMA = """CREATE TABLE headings (
+    id INTEGER PRIMARY KEY,
+    topic TEXT NOT NULL COLLATE NOCASE,
+    name TEXT NOT NULL COLLATE NOCASE,
+    position INTEGER NOT NULL,
+    UNIQUE (topic, name)
+)"""
 
 # A line starting with # in the text is a sub-heading for the text after it: "# Tea".
 _HEADING_LINE = re.compile(r"^[ \t]{0,3}#+[ \t]*(\S.*?)[ \t#]*$")
@@ -170,6 +183,7 @@ class Entry:
     sections: list[Section]
     created: str
     updated: str
+    topic: str = ""
 
     @property
     def headings(self) -> list[str]:
@@ -186,6 +200,7 @@ class EntrySummary:
     headings: list[str]
     pieces: int
     updated: str
+    topic: str = ""
 
 
 @dataclass
@@ -284,37 +299,72 @@ class EntriesMixin:
     conn: sqlite3.Connection
     seed_headings: list[str]
 
-    # --- the master list of sub-headings ---
+    # --- sub-headings: one ordered list per topic ---
 
-    @property
-    def headings(self) -> list[str]:
-        """Every sub-heading, in the order entries show them."""
+    def _entry_topic(self, entry_id: int | None) -> str:
+        if entry_id is None:
+            return ""
         try:
-            return [r[0] for r in self.conn.execute("SELECT name FROM headings ORDER BY position, id")]
-        except sqlite3.OperationalError:  # while upgrading from before version 4
-            return list(self.seed_headings)
+            row = self.conn.execute("SELECT topic FROM entries WHERE id = ?", (entry_id,)).fetchone()
+        except sqlite3.OperationalError:  # while upgrading from before version 6
+            return ""
+        return row[0] if row else ""
 
-    def _remember_heading(self, heading: str) -> None:
-        """Add a sub-heading to the end of the master list, if it isn't on it."""
+    def headings_for(self, topic: str | None) -> list[str]:
+        """A topic's sub-headings, in the order its entries show them."""
+        try:
+            return [r[0] for r in self.conn.execute(
+                "SELECT name FROM headings WHERE topic = ? ORDER BY position, id", (_norm(topic),))]
+        except sqlite3.OperationalError:  # while upgrading from before version 6
+            return []
+
+    def heading_topics(self) -> list[str]:
+        """The topics that have sub-headings, A to Z, with no topic ('') last."""
+        topics = [r[0] for r in self.conn.execute("SELECT DISTINCT topic FROM headings")]
+        return sorted(topics, key=lambda t: (t == "", t.casefold()))
+
+    def _remember_heading(self, topic: str | None, heading: str) -> None:
+        """Add a sub-heading to the end of a topic's list, if it isn't on it."""
         try:
             self.conn.execute(
-                "INSERT OR IGNORE INTO headings (name, position)"
-                " SELECT ?, COALESCE(MAX(position), -1) + 1 FROM headings", (heading,))
-        except sqlite3.OperationalError:  # while upgrading from before version 4
+                "INSERT OR IGNORE INTO headings (topic, name, position)"
+                " SELECT ?1, ?2, COALESCE(MAX(position), -1) + 1 FROM headings WHERE topic = ?1",
+                (_norm(topic), heading))
+        except sqlite3.OperationalError:  # while upgrading from before version 6
             pass
 
-    def heading_counts(self) -> list[tuple[str, int]]:
-        """The master list, in order, with how many entries use each sub-heading."""
+    def add_headings(self, topic: str | None, names: list[str]) -> list[str]:
+        """Add sub-headings to the end of a topic's list, skipping any on it. Returns the list."""
+        names = [clean_heading(n) for n in names]
+        with self.conn:
+            for name in names:
+                self._remember_heading(topic, name)
+        return self.headings_for(topic)
+
+    def heading_counts(self, topic: str | None) -> list[tuple[str, int]]:
+        """A topic's list, in order, with how many of its entries use each sub-heading."""
         return [(r[0], r[1]) for r in self.conn.execute(
             "SELECT h.name, COUNT(s.id) FROM headings h LEFT JOIN sections s ON s.heading = h.name"
-            " GROUP BY h.id ORDER BY h.position, h.id")]
+            " AND s.entry_id IN (SELECT id FROM entries WHERE topic = h.topic)"
+            " WHERE h.topic = ? GROUP BY h.id ORDER BY h.position, h.id", (_norm(topic),))]
 
-    def _order_key(self):
-        """A sort key for (heading, section id): the master list's order, then any others
-        in the order they were made."""
-        order = {h.casefold(): i for i, h in enumerate(self.headings)}
+    def _order_key(self, topic: str | None):
+        """A sort key for (heading, section id): the topic's order, then any others in the
+        order they were made."""
+        order = {h.casefold(): i for i, h in enumerate(self.headings_for(topic))}
         return lambda heading, section_id: (
             (order[heading.casefold()], 0) if heading.casefold() in order else (len(order), section_id))
+
+    def default_heading(self, topic: str | None) -> str | None:
+        """Where text goes when no sub-heading is given: the first on the topic's list, or
+        None if the topic has none yet."""
+        found = self.headings_for(topic)
+        return found[0] if found else None
+
+    @staticmethod
+    def _no_headings(topic: str | None) -> EntryInvalid:
+        where = f"{topic} has" if _norm(topic) else "Entries with no topic have"
+        return EntryInvalid(f"{where} no sub-headings yet. Start the text with a # line for one, e.g. # Overview.")
 
     # --- finding entries ---
 
@@ -331,10 +381,10 @@ class EntriesMixin:
         return self.get_entry(entry_id) if entry_id is not None else None
 
     def _heading_for(self, entry_id: int | None, heading: str) -> str:
-        """How to spell a sub-heading: as the master list has it, or as the entry already
-        has it, or as typed. So "tea" goes under Tea."""
+        """How to spell a sub-heading: as the entry's topic list has it, or as the entry
+        already has it, or as typed. So "tea" goes under Tea."""
         heading = clean_heading(heading)
-        for known in self.headings:
+        for known in self.headings_for(self._entry_topic(entry_id)):
             if known.casefold() == heading.casefold():
                 return known
         if entry_id is not None:
@@ -345,30 +395,40 @@ class EntriesMixin:
                 return row[0]
         return heading
 
-    @property
-    def default_heading(self) -> str:
-        return self.headings[0] if self.headings else DEFAULT_HEADINGS[0]
-
     # --- writing ---
 
-    def create_entry(self, title: str, tags: list[str] = ()) -> Entry:
+    def create_entry(self, title: str, tags: list[str] = (), topic: str | None = None) -> Entry:
         title = clean_title(title)
         with self.conn:
             if self.entry_id(title) is not None:
                 raise EntryInvalid(f"There's already an entry called \"{title}\" (or with that as another name).")
-            entry_id = self._insert_entry(title)
+            entry_id = self._insert_entry(title, topic)
             self._set_entry_tags(entry_id, tags)
             self._reindex_entry(entry_id)
         return self.get_entry(entry_id)
 
-    def _insert_entry(self, title: str) -> int:
+    def _insert_entry(self, title: str, topic: str | None = None) -> int:
         # Typing "nettle" makes Nettle. A title with capitals of its own is kept as typed.
         if title == title.lower():
             title = title[:1].upper() + title[1:]
         now = _now()
         return self.conn.execute(
-            "INSERT INTO entries (title, created, updated) VALUES (?, ?, ?)", (title, now, now)
+            "INSERT INTO entries (title, topic, created, updated) VALUES (?, ?, ?, ?)", (title, _norm(topic), now, now)
         ).lastrowid
+
+    def set_entry_topic(self, entry_id: int, topic: str | None) -> str:
+        """Move an entry to another topic. Its sub-headings are added to that topic's list
+        if they aren't on it. Returns the topic."""
+        topic = _norm(topic)
+        with self.conn:
+            entry = self.get_entry(entry_id)
+            if entry is None:
+                raise EntryInvalid("There's no such entry.")
+            self.conn.execute("UPDATE entries SET topic = ? WHERE id = ?", (topic, entry_id))
+            for heading in entry.headings:
+                self._remember_heading(topic, heading)
+            self._touch(entry_id)
+        return topic
 
     def _section_id(self, entry_id: int, heading: str) -> int:
         heading = self._heading_for(entry_id, heading)
@@ -377,7 +437,7 @@ class EntriesMixin:
         ).fetchone()
         if row:
             return row[0]
-        self._remember_heading(heading)
+        self._remember_heading(self._entry_topic(entry_id), heading)
         return self.conn.execute(
             "INSERT INTO sections (entry_id, heading) VALUES (?, ?)", (entry_id, heading)
         ).lastrowid
@@ -385,24 +445,32 @@ class EntriesMixin:
     def _touch(self, entry_id: int) -> None:
         self.conn.execute("UPDATE entries SET updated = ? WHERE id = ?", (_now(), entry_id))
 
-    def add_piece(self, title: str, heading: str | None, piece: Piece) -> Piece:
-        """Add text to the end of an entry's sub-heading, making the entry first if it's new.
-        With no sub-heading, it goes under the first one in the config (Description)."""
+    def add_piece(self, title: str, heading: str | None, piece: Piece, topic: str | None = None) -> Piece:
+        """Add text to the end of an entry's sub-heading, making the entry first if it's new
+        (in the given topic, or the piece's). With no sub-heading, it goes under the first
+        on the entry's topic list."""
         title, piece = clean_title(title), validate_piece(piece)
         with self.conn:
             entry_id = self.entry_id(title)
             if entry_id is None:
-                entry_id = self._insert_entry(title)
-            piece_id = self._insert_piece(self._section_id(entry_id, heading or self.default_heading), piece)
+                entry_id = self._insert_entry(title, topic if topic is not None else piece.topic)
+            if not heading:
+                entry_topic = self._entry_topic(entry_id)
+                heading = self.default_heading(entry_topic)
+                if heading is None:
+                    raise self._no_headings(entry_topic)
+            piece_id = self._insert_piece(self._section_id(entry_id, heading), piece)
             self._touch(entry_id)
             self._reindex_entry(entry_id)
         return self.get_piece(piece_id)
 
-    def add_text(self, title: str, text: str, source: Piece | None = None) -> tuple[list[Piece], bool]:
-        """Add text to an entry, making the entry first if it's new. Lines starting with #
-        are sub-headings for the text after them ("# Tea"); text before any goes under the
-        first sub-heading on the list (Description). Each part is added to the end of its
-        sub-heading, with the same source.
+    def add_text(self, title: str, text: str, source: Piece | None = None,
+                 topic: str | None = None) -> tuple[list[Piece], bool]:
+        """Add text to an entry, making the entry first if it's new (in the given topic, or
+        the source's). Lines starting with # are sub-headings for the text after them
+        ("# Tea"); text before any goes under the first sub-heading on the entry's topic list
+        (Description), or if the topic has none yet, under the first one typed. Each part is
+        added to the end of its sub-heading, with the same source.
 
         Returns (the pieces added, whether the entry is new)."""
         title = clean_title(title)
@@ -417,8 +485,14 @@ class EntriesMixin:
             entry_id = self.entry_id(title)
             new = entry_id is None
             if new:
-                entry_id = self._insert_entry(title)
-            ids = [self._insert_piece(self._section_id(entry_id, heading or self.default_heading), piece)
+                entry_id = self._insert_entry(title, topic if topic is not None else source.topic)
+            default = None
+            if any(heading is None for heading, _ in parts):
+                entry_topic = self._entry_topic(entry_id)
+                default = self.default_heading(entry_topic) or next((h for h, _ in parts if h is not None), None)
+                if default is None:
+                    raise self._no_headings(entry_topic)
+            ids = [self._insert_piece(self._section_id(entry_id, heading or default), piece)
                    for heading, piece in parts]
             self._touch(entry_id)
             self._reindex_entry(entry_id)
@@ -506,7 +580,7 @@ class EntriesMixin:
                 title = clean_title(title)
                 entry_id = self.entry_id(title)
                 if entry_id is None:
-                    entry_id = self._insert_entry(title)
+                    entry_id = self._insert_entry(title, self._entry_topic(old_entry))
             section_id = self._section_id(entry_id, heading if heading is not None else row["heading"])
             self._move_to_section(piece_id, section_id)
             if position is not None:
@@ -642,8 +716,8 @@ class EntriesMixin:
             ).fetchone()
             if row is None:
                 raise EntryInvalid(f"This entry has no sub-heading \"{heading}\".")
-            new_heading = self._heading_for(None, clean_heading(new_heading))
-            self._remember_heading(new_heading)
+            new_heading = self._heading_for(entry_id, clean_heading(new_heading))
+            self._remember_heading(self._entry_topic(entry_id), new_heading)
             section_id = self._rename_section(entry_id, row[0], new_heading)
             self._touch(entry_id)
             self._reindex_entry(entry_id)
@@ -669,37 +743,45 @@ class EntriesMixin:
         self.conn.execute("DELETE FROM sections_fts WHERE rowid = ?", (section_id,))
         return into[0]
 
-    # --- the master list of sub-headings: order, rename and merge, remove ---
+    # --- a topic's list of sub-headings: order, rename and merge, remove ---
 
-    def reorder_headings(self, names: list[str]) -> list[str]:
-        """Put the master list in this order. Any left out keep their order, after these.
+    def _topic_heading(self, topic: str, name: str):
+        return self.conn.execute(
+            "SELECT id, name FROM headings WHERE topic = ? AND name = ?", (topic, _norm(name))).fetchone()
+
+    def reorder_headings(self, topic: str | None, names: list[str]) -> list[str]:
+        """Put a topic's list in this order. Any left out keep their order, after these.
         Returns the list."""
+        topic = _norm(topic)
         with self.conn:
-            current = self.headings
+            current = self.headings_for(topic)
             given: list[str] = []
             for name in names:
                 match = next((h for h in current if h.casefold() == _norm(name).casefold()), None)
                 if match is not None and match not in given:
                     given.append(match)
             order = given + [h for h in current if h not in given]
-            self.conn.executemany("UPDATE headings SET position = ? WHERE name = ?", list(enumerate(order)))
-        return self.headings
+            self.conn.executemany("UPDATE headings SET position = ? WHERE topic = ? AND name = ?",
+                                  [(i, topic, h) for i, h in enumerate(order)])
+        return self.headings_for(topic)
 
-    def rename_heading(self, name: str, new_name: str) -> tuple[str, bool]:
-        """Rename a sub-heading in every entry. If the new name is already on the list, the
-        two are merged: in each entry, text under the old one goes to the end of the new one.
+    def rename_heading(self, topic: str | None, name: str, new_name: str) -> tuple[str, bool]:
+        """Rename a sub-heading in every entry in a topic. If the new name is already on the
+        topic's list, the two are merged: in each entry, text under the old one goes to the
+        end of the new one.
 
         Returns (the sub-heading's name now, whether it was merged)."""
-        new_name = clean_heading(new_name)
+        topic, new_name = _norm(topic), clean_heading(new_name)
         with self.conn:
-            row = self.conn.execute("SELECT id, name FROM headings WHERE name = ?", (_norm(name),)).fetchone()
+            row = self._topic_heading(topic, name)
             if row is None:
                 raise EntryInvalid(f"There's no sub-heading called \"{name}\".")
-            target = self.conn.execute("SELECT id, name FROM headings WHERE name = ?", (new_name,)).fetchone()
+            target = self._topic_heading(topic, new_name)
             merged = target is not None and target[0] != row[0]
             final = target[1] if merged else new_name
             affected = self.conn.execute(
-                "SELECT id, entry_id FROM sections WHERE heading = ?", (row[1],)).fetchall()
+                "SELECT s.id, s.entry_id FROM sections s JOIN entries e ON e.id = s.entry_id"
+                " WHERE s.heading = ? AND e.topic = ?", (row[1], topic)).fetchall()
             for section_id, entry_id in affected:
                 self._rename_section(entry_id, section_id, final)
             if merged:
@@ -711,20 +793,22 @@ class EntriesMixin:
                 self._reindex_entry(entry_id)
         return final, merged
 
-    def remove_heading(self, name: str) -> bool:
-        """Take a sub-heading no entry uses off the list. Returns False if it isn't on it."""
+    def remove_heading(self, topic: str | None, name: str) -> bool:
+        """Take a sub-heading that none of a topic's entries use off its list. Returns False
+        if it isn't on it."""
+        topic = _norm(topic)
         with self.conn:
-            row = self.conn.execute("SELECT id, name FROM headings WHERE name = ?", (_norm(name),)).fetchone()
+            row = self._topic_heading(topic, name)
             if row is None:
                 return False
-            used = self.conn.execute("SELECT COUNT(*) FROM sections WHERE heading = ?", (row[1],)).fetchone()[0]
+            used = self.conn.execute(
+                "SELECT COUNT(*) FROM sections s JOIN entries e ON e.id = s.entry_id"
+                " WHERE s.heading = ? AND e.topic = ?", (row[1], topic)).fetchone()[0]
             if used:
                 raise EntryInvalid(
                     f"{used} entr{'ies use' if used != 1 else 'y uses'} \"{row[1]}\". "
                     "To combine it with another sub-heading, rename it to that one."
                 )
-            if self.conn.execute("SELECT COUNT(*) FROM headings").fetchone()[0] == 1:
-                raise EntryInvalid("The list needs at least one sub-heading.")
             self.conn.execute("DELETE FROM headings WHERE id = ?", (row[0],))
         return True
 
@@ -826,10 +910,23 @@ class EntriesMixin:
             Section(s["id"], s["heading"], pieces.get(s["id"], []))
             for s in self.conn.execute("SELECT id, heading FROM sections WHERE entry_id = ?", (entry_id,))
         ]
-        order = self._order_key()
+        topic = row["topic"] if "topic" in row.keys() else ""
+        order = self._order_key(topic)
         sections.sort(key=lambda s: order(s.heading, s.id))
         return Entry(row["id"], row["title"], self._entry_aliases(entry_id), self._entry_tags(entry_id),
-                     sections, row["created"], row["updated"])
+                     sections, row["created"], row["updated"], topic)
+
+    def _order_keys(self, topics: dict[int, str]):
+        """A sort key per entry id, from each entry's topic."""
+        keys = {t.casefold(): self._order_key(t) for t in set(topics.values())}
+        return {entry_id: keys[t.casefold()] for entry_id, t in topics.items()}
+
+    def _topics(self, ids) -> dict[int, str]:
+        ids = list(ids)
+        if not ids:
+            return {}
+        return dict(self.conn.execute(
+            f"SELECT id, topic FROM entries WHERE id IN ({', '.join('?' * len(ids))})", ids).fetchall())
 
     def _summaries(self, ids: list[int]) -> dict[int, EntrySummary]:
         if not ids:
@@ -837,16 +934,19 @@ class EntriesMixin:
         marks = ", ".join("?" * len(ids))
         heads: dict[int, list[tuple]] = {}
         counts: dict[int, int] = {}
-        order = self._order_key()
+        topics = self._topics(ids)
+        orders = self._order_keys(topics)
         for r in self.conn.execute(
                 f"SELECT s.id, s.entry_id, s.heading, COUNT(p.id) AS n FROM sections s"
                 f" JOIN pieces p ON p.section_id = s.id WHERE s.entry_id IN ({marks}) GROUP BY s.id", ids):
+            order = orders[r["entry_id"]]
             heads.setdefault(r["entry_id"], []).append((order(r["heading"], r["id"]), r["heading"]))
             counts[r["entry_id"]] = counts.get(r["entry_id"], 0) + r["n"]
         return {
             r["id"]: EntrySummary(
                 r["id"], r["title"], self._entry_aliases(r["id"]), self._entry_tags(r["id"]),
                 [h for _, h in sorted(heads.get(r["id"], []))], counts.get(r["id"], 0), r["updated"],
+                topics.get(r["id"], ""),
             )
             for r in self.conn.execute(f"SELECT id, title, updated FROM entries WHERE id IN ({marks})", ids)
         }
@@ -936,14 +1036,14 @@ class EntriesMixin:
 
         scores = dict(entry_scores)
         found: dict[int, list[tuple]] = {}
-        order = self._order_key()
+        orders = self._order_keys(self._topics({r["entry_id"] for r in rows}))
         for r in rows:
             scores[r["entry_id"]] = min(scores.get(r["entry_id"], 0.0), r["score"])
             # A sub-heading counts as found in when the words are in its name or its text, not
             # just because every row carries the entry's title.
             if mark[0] in r["heading_hit"] or mark[0] in r["snippet"]:
                 found.setdefault(r["entry_id"], []).append(
-                    (order(r["heading"], r["id"]), SectionHit(r["heading"], r["snippet"])))
+                    (orders[r["entry_id"]](r["heading"], r["id"]), SectionHit(r["heading"], r["snippet"])))
         if topic:
             allowed = {r[0] for r in self.conn.execute(
                 "SELECT DISTINCT s.entry_id FROM sections s JOIN pieces p ON p.section_id = s.id"
@@ -1030,7 +1130,51 @@ def migrate_to_heading_list(store) -> None:
     store.conn.execute(HEADINGS_SCHEMA)
     others = [r[0] for r in store.conn.execute("SELECT heading FROM sections GROUP BY heading ORDER BY MIN(id)")]
     for heading in [*store.seed_headings, *others]:
-        store._remember_heading(heading)
+        store.conn.execute(
+            "INSERT OR IGNORE INTO headings (name, position) SELECT ?, COALESCE(MAX(position), -1) + 1 FROM headings",
+            (heading,))
+
+
+def migrate_to_topic_headings(store) -> None:
+    """Notes version 6: a topic on each entry, and a list of sub-headings per topic."""
+    conn = store.conn
+    conn.execute("ALTER TABLE entries ADD COLUMN topic TEXT NOT NULL DEFAULT '' COLLATE NOCASE")
+    old = [r[0] for r in conn.execute("SELECT name FROM headings ORDER BY position, id")]
+    conn.execute("DROP TABLE headings")
+    conn.execute(TOPIC_HEADINGS_SCHEMA)
+    rebuild_heading_lists(store, old, set_topics=True)
+
+
+def rebuild_heading_lists(store, old: list[str], *, set_topics: bool) -> None:
+    """Make the lists of sub-headings from one old list (from before version 6, or a version 2
+    backup). With set_topics, each entry first gets the topic most of its text came from.
+
+    The old list goes to the topic most entries are in (or FIRST_TOPIC if none have a
+    topic); every other topic gets the sub-headings its entries use, in the old list's order."""
+    conn = store.conn
+    if set_topics:
+        for (entry_id,) in conn.execute("SELECT id FROM entries").fetchall():
+            row = conn.execute(
+                "SELECT p.topic FROM pieces p JOIN sections s ON s.id = p.section_id"
+                " WHERE s.entry_id = ? AND COALESCE(p.topic, '') != ''"
+                " GROUP BY p.topic COLLATE NOCASE ORDER BY COUNT(*) DESC, MIN(p.id) LIMIT 1", (entry_id,)).fetchone()
+            conn.execute("UPDATE entries SET topic = ? WHERE id = ?", (row[0] if row else "", entry_id))
+    conn.execute("DELETE FROM headings")
+    topics = [r[0] for r in conn.execute(
+        "SELECT topic FROM entries WHERE topic != '' GROUP BY topic ORDER BY COUNT(*) DESC, topic COLLATE NOCASE")]
+    first = topics[0] if topics else FIRST_TOPIC
+    for heading in old:
+        try:
+            store._remember_heading(first, clean_heading(heading))
+        except (EntryInvalid, TypeError):
+            continue
+    rank = {h.casefold(): i for i, h in enumerate(old) if isinstance(h, str)}
+    for (topic,) in conn.execute("SELECT DISTINCT topic FROM entries").fetchall():
+        used = conn.execute(
+            "SELECT s.heading, MIN(s.id) FROM sections s JOIN entries e ON e.id = s.entry_id"
+            " WHERE e.topic = ? GROUP BY s.heading", (topic,)).fetchall()
+        for heading, _ in sorted(used, key=lambda r: (rank.get(r[0].casefold(), len(rank)), r[1])):
+            store._remember_heading(topic, heading)
 
 
 def migrate_to_entries(store) -> None:

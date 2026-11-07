@@ -134,11 +134,15 @@ def add_kb_pages(app: FastAPI, config: Config, open_db: Callable[[], Database], 
         return kb_view(request, entry_id, q, tag, part)
 
     @app.get("/kb/headings")
-    def kb_headings(request: Request):
-        """The master list of sub-headings: reorder, rename and merge, remove."""
+    def kb_headings(request: Request, topic: str | None = None):
+        """A topic's list of sub-headings (the first topic with any, unless one is asked
+        for): reorder, rename and merge, remove."""
         with open_db() as db, open_notes_for(config, create=False) as store:
-            found = store.heading_counts() if store else [(h, 0) for h in config.headings]
-            return page(request, "kb_headings.html", db, section="kb",
+            topics = store.heading_topics() if store else []
+            if topic is None:
+                topic = topics[0] if topics else ""
+            found = store.heading_counts(topic) if store else []
+            return page(request, "kb_headings.html", db, section="kb", topic=topic, topics=topics,
                         headings=[{"name": n, "entries": c} for n, c in found])
 
     @app.get("/kb/new")

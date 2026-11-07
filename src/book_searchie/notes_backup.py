@@ -1,9 +1,11 @@
 """Exporting the KB (JSON for a full backup, Markdown for reading) and restoring a JSON backup.
 
-Version 2 of the JSON backup has the KB's entries (with their sub-headings, text, tags
-and other names), the list of sub-headings, and research records, as well as the older
-notes. A version 1 backup (notes only) can still be restored: its notes are turned into
-entries, as when the notes file was upgraded.
+Version 3 of the JSON backup has the KB's entries (with their topic, sub-headings, text,
+tags and other names), each topic's list of sub-headings, and research records, as well as
+the older notes. Older backups can still be restored: in a version 2 backup there's one
+list of sub-headings and entries have no topic, and a version 1 backup has notes only,
+which are turned into entries. Both are sorted into topics as when the notes file was
+upgraded.
 """
 
 from __future__ import annotations
@@ -14,11 +16,12 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .entries import ENTRY_TAG_KIND, Entry, EntryInvalid, Piece, clean_entry_tag, clean_heading, clean_title, validate_piece
+from .entries import (ENTRY_TAG_KIND, Entry, EntryInvalid, Piece, clean_entry_tag, clean_heading, clean_title,
+                      rebuild_heading_lists, validate_piece)
 from .notes import SOURCE_TYPES, Note, NoteInvalid, NotesStore, Tag, clean_tag_name, validate
 
 FORMAT = "book-searchie-notes"
-VERSION = 2
+VERSION = 3
 
 
 class RestoreError(ValueError):
@@ -66,7 +69,7 @@ def _source_dict(p) -> dict | None:
 
 def _entry_dict(entry: Entry) -> dict:
     return {
-        "id": entry.id, "title": entry.title, "aliases": entry.aliases, "tags": entry.tags,
+        "id": entry.id, "title": entry.title, "topic": entry.topic, "aliases": entry.aliases, "tags": entry.tags,
         "created": entry.created, "updated": entry.updated,
         "sections": [{
             "heading": s.heading,
@@ -80,13 +83,14 @@ def _entry_dict(entry: Entry) -> dict:
 
 
 def export_json(store: NotesStore) -> dict:
-    """Everything in the KB: entries with their text, sources, tags and other names; the
-    list of sub-headings; research records; the older notes; and other names for tags."""
+    """Everything in the KB: entries with their topic, text, sources, tags and other names;
+    each topic's list of sub-headings; research records; the older notes; and other names
+    for tags."""
     return {
         "format": FORMAT,
         "version": VERSION,
         "exported": _now(),
-        "headings": store.headings,
+        "headings": [{"topic": t, "names": store.headings_for(t)} for t in store.heading_topics()],
         "entries": [_entry_dict(e) for e in store.all_entries()],
         "research": [{"term": r.term, "path": r.path, "book_title": r.book_title, "topic": r.topic,
                       "done": r.done, "missing": r.source_missing} for r in store.research_records()],
@@ -230,6 +234,27 @@ def restore(store: NotesStore, data: dict, *, replace: bool = False, notes_path:
     return store.entry_count()
 
 
+def _restore_heading_lists(store: NotesStore, data: dict, entries: list[dict]) -> None:
+    """Each topic's list of sub-headings from a version 3 backup, or from the one list in a
+    version 2 backup. Every sub-heading an entry uses ends up on its topic's list."""
+    headings = data.get("headings")
+    if data["version"] < 3:
+        rebuild_heading_lists(store, headings if isinstance(headings, list) else [], set_topics=True)
+        return
+    for group in headings if isinstance(headings, list) else []:
+        if not isinstance(group, dict) or not isinstance(group.get("names"), list):
+            continue
+        topic = " ".join(str(group.get("topic") or "").split())
+        for name in group["names"]:
+            try:
+                store._remember_heading(topic, clean_heading(name))
+            except (EntryInvalid, TypeError):
+                continue
+    for e in entries:
+        for section in e["sections"]:
+            store._remember_heading(e["topic"], section["heading"])
+
+
 def _kb_size(store: NotesStore) -> str:
     """What's in the KB, for "Your KB already has ...", or "" if it's empty."""
     entries, notes = store.entry_count(), store.count()
@@ -239,13 +264,14 @@ def _kb_size(store: NotesStore) -> str:
 
 
 def _entries_from(data: dict) -> list[dict]:
-    """The entries in a version 2 backup, checked, or raise RestoreError."""
+    """The entries in a version 2 or 3 backup, checked, or raise RestoreError."""
     entries = []
     for i, item in enumerate(data.get("entries", []), 1):
         try:
             entry = {
                 "id": int(item["id"]) if item.get("id") is not None else None,
                 "title": clean_title(item["title"]),
+                "topic": " ".join(str(item.get("topic") or "").split()),
                 "aliases": [clean_title(a) for a in item.get("aliases", [])],
                 "tags": [clean_entry_tag(t) for t in item.get("tags", [])],
                 "created": item.get("created") or _now(), "updated": item.get("updated") or _now(),
@@ -302,24 +328,18 @@ def _replace_all(store: NotesStore, notes: list[Note], aliases: list, entries: l
         for note in notes:
             store._reindex(note.id)
 
-        headings = data.get("headings") if entries is not None else None
-        for name in [*(headings if isinstance(headings, list) else store.seed_headings)]:
-            try:
-                store._remember_heading(clean_heading(name))
-            except (EntryInvalid, TypeError):
-                continue
         if entries is None:  # a version 1 backup: its notes become entries
             store._convert_notes()
+            rebuild_heading_lists(store, store.seed_headings, set_topics=True)
             return
         for e in entries:
             entry_id = conn.execute(
-                "INSERT INTO entries (id, title, created, updated) VALUES (?, ?, ?, ?)",
-                (e["id"], e["title"], e["created"], e["updated"])).lastrowid
+                "INSERT INTO entries (id, title, topic, created, updated) VALUES (?, ?, ?, ?, ?)",
+                (e["id"], e["title"], e["topic"], e["created"], e["updated"])).lastrowid
             for alias in e["aliases"]:
                 conn.execute("INSERT INTO entry_aliases (entry_id, alias) VALUES (?, ?)", (entry_id, alias))
             store._set_entry_tags(entry_id, e["tags"])
             for section in e["sections"]:
-                store._remember_heading(section["heading"])
                 section_id = conn.execute("INSERT INTO sections (entry_id, heading) VALUES (?, ?)",
                                           (entry_id, section["heading"])).lastrowid
                 for position, p in enumerate(section["pieces"]):
@@ -329,6 +349,7 @@ def _replace_all(store: NotesStore, notes: list[Note], aliases: list, entries: l
                         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (p.id, section_id, position, p.body, p.source_type, p.topic, p.path, p.seq, p.label,
                          p.book_title, p.href, p.source_ref, p.source_url, int(p.source_missing), p.created, p.updated))
+        _restore_heading_lists(store, data, entries)
         for e in entries:  # after all aliases, so tags' other names are in place
             store._reindex_entry(conn.execute("SELECT id FROM entries WHERE title = ?", (e["title"],)).fetchone()[0])
         for r in data.get("research", []):

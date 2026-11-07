@@ -2,6 +2,7 @@
 // remove one no entry uses. Each change is saved straight away.
 (function () {
   const list = document.getElementById("heading-list");
+  const topic = list.dataset.topic || "";
   const status = document.getElementById("heading-status");
   const HEADERS = { "Content-Type": "application/json", "X-Book-Searchie": "1" };
 
@@ -33,7 +34,7 @@
 
   async function saveOrder() {
     try {
-      await send("PUT", "/api/headings/order", { names: rows().map((r) => r.dataset.name) });
+      await send("PUT", "/api/headings/order", { topic, names: rows().map((r) => r.dataset.name) });
       say("Order saved.", "ok");
     } catch (err) {
       say(err.message, "error");
@@ -57,14 +58,14 @@
       const to = (prompt(`Rename "${name}" in every entry. Using another sub-heading's name merges the two.`, name) || "").trim();
       if (!to || to === name) return;
       try {
-        await send("POST", "/api/headings/rename", { name, new_name: to });
+        await send("POST", "/api/headings/rename", { topic, name, new_name: to });
         location.reload();
       } catch (err) {
         say(err.message, "error");
       }
     } else if (act === "remove") {
       try {
-        await send("DELETE", `/api/headings?${new URLSearchParams({ name })}`);
+        await send("DELETE", `/api/headings?${new URLSearchParams({ name, topic })}`);
         row.remove();
         tidy();
         say(`Removed "${name}".`, "ok");

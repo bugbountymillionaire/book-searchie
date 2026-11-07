@@ -89,15 +89,19 @@ def epub_to_pdf(epub: Path) -> pymupdf.Document:
 
 # Sample KB entries. Text from a book is the sentence that starts with the given words,
 # found in the downloaded text, so it points at the right page or chapter. Lines starting
-# with # are sub-headings, as when typing in Save to KB; "Uses" and "Timing" aren't on the
-# starting list, so they're added to it.
+# with # are sub-headings, as when typing in Save to KB. Each is added to its entry's topic
+# list if it isn't on it: "Uses" to Herbalism's, "Timing" to Beekeeping's.
 BOOK_TEXT = [
     ("Nettle", "Culpeper - The Complete Herbal", "# Poultice", "An handful of the leaves of green Nettles"),
     ("Comfrey", "Culpeper - The Complete Herbal", "# Uses", "The water of Comfrey solders broken bones"),
     ("Swarms", "Langstroth - On the Hive and the Honey-Bee", "# Timing",
      "If the Apiarian wishes, to be sure the first season"),
-    ("Dovetail halving", "Fairham - Woodwork Joints", "", "This is a strong joint, used where outside strain"),
+    ("Dovetail halving", "Fairham - Woodwork Joints", "# Uses", "This is a strong joint, used where outside strain"),
 ]
+# Herbalism's sub-headings. Other topics start with none: their lists are made from the
+# sub-headings typed in their text.
+HERBAL_HEADINGS = ["Description", "Identification", "Harvesting", "Tea", "Tincture", "Poultice", "Infused oil",
+                   "Cautions"]
 # (entry, topic, text, where it's from: None for your own words, or (name, link)).
 OTHER_TEXT = [
     ("Nettle", "Herbalism", "Grows by the compost heap, in full sun.\n"
@@ -140,7 +144,8 @@ def _find_quote(db: Database, file_id: int, start: str) -> tuple[int, str, str |
 def add_sample_entries(config, db: Database) -> int:
     books = {row["title"]: row for row in db.conn.execute("SELECT id, title, path, topic FROM files")}
     config.notes_path.unlink(missing_ok=True)  # the demo starts fresh each time
-    with NotesStore.open(config.notes_path, config.headings) as store:
+    with NotesStore.open(config.notes_path) as store:
+        store.add_headings("Herbalism", HERBAL_HEADINGS)
         for entry, book, heading, start in BOOK_TEXT:
             row = books[book]
             seq, label, href, quote = _find_quote(db, row["id"], start)

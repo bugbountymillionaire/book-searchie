@@ -67,8 +67,13 @@ def test_records_follow_their_book(store):
 def test_upgrading_keeps_a_v4_file(tmp_path):
     path = tmp_path / "notes.db"
     with NotesStore.open(path) as s:
-        s.add_text("Nettle", "Stings.")
-        s.conn.executescript("DROP TABLE research; PRAGMA user_version = 4;")
+        s.add_text("Nettle", "# Description\nStings.")
+        # Back to version 4: no research, no topics, and one list of sub-headings.
+        s.conn.executescript(
+            "DROP TABLE research; ALTER TABLE entries DROP COLUMN topic; DROP TABLE headings;"
+            " CREATE TABLE headings (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE,"
+            " position INTEGER NOT NULL); INSERT INTO headings (name, position) VALUES ('Description', 0);"
+            " PRAGMA user_version = 4;")
     with NotesStore.open(path) as s:
         assert s.find_entry("Nettle") is not None
         s.set_researched("nettle", BOOK, True)

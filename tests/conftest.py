@@ -10,6 +10,19 @@ from book_searchie.config import Config
 from book_searchie.db import Database
 
 
+# The herbal sub-headings a new KB used to start with. A new KB now has none, so tests that
+# save text without a # line give their topics this list first.
+HERBAL = ["Description", "Identification", "Harvesting", "Tea", "Tincture", "Poultice", "Infused oil", "Cautions"]
+TOPICS = ("", "Herbalism", "Woodwork", "Gardening")
+
+
+def seed_headings(store, topics=TOPICS, names=HERBAL) -> None:
+    with store.conn:
+        for topic in topics:
+            for name in names:
+                store._remember_heading(topic, name)
+
+
 def make_pdf(path: Path, pages: list[str], labels: list[dict] | None = None) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     doc = pymupdf.open()
@@ -85,6 +98,15 @@ def library(tmp_path: Path) -> Path:
 def config(library: Path, tmp_path: Path) -> Config:
     # notes_path is set so tests can never touch a real notes file in the working directory.
     return Config(roots=[library], index_path=tmp_path / "index.db", notes_path=tmp_path / "notes.db")
+
+
+@pytest.fixture
+def kb(config: Config) -> None:
+    """A KB whose topics have the herbal sub-headings."""
+    from book_searchie.notes import NotesStore
+
+    with NotesStore.open(config.notes_path) as store:
+        seed_headings(store)
 
 
 @pytest.fixture

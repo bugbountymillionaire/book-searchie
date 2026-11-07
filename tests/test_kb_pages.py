@@ -7,6 +7,7 @@ from book_searchie.indexer import run_index
 from book_searchie.entries import Piece
 from book_searchie.notes import Note, NotesStore, Tag
 from book_searchie.web.app import create_app
+from .conftest import seed_headings
 
 
 @pytest.fixture
@@ -19,6 +20,7 @@ def client(config, db):
 @pytest.fixture
 def notes(config):
     with NotesStore.open(config.notes_path) as store:
+        seed_headings(store)
         yield store
 
 
@@ -120,17 +122,21 @@ def test_kb_search_and_tag(client, notes, db):
 
 def test_headings_page(client, notes, db):
     add_entries(notes, db)
-    page = client.get("/kb/headings").text
-    assert "<h1>Sub-headings</h1>" in page and "kb_headings.js" in page
+    page = client.get("/kb/headings?topic=Herbalism").text
+    assert "<h1>Sub-headings for Herbalism</h1>" in page and "kb_headings.js" in page
+    assert 'data-topic="Herbalism"' in page
     tea = page.split('data-name="Tea"')[1].split("</li>")[0]
     assert "1 entry" in tea and 'data-act="remove"' not in tea  # in use: can't remove
-    sap = page.split('data-name="Sap"')[1].split("</li>")[0]
+    assert 'data-name="Sap"' not in page  # Birch has no topic, so Sap is on that list
+    sap = client.get("/kb/headings?topic=").text.split('data-name="Sap"')[1].split("</li>")[0]
     assert 'data-act="rename"' in sap
+    # With no topic asked for, the first topic with sub-headings.
+    assert "<h1>Sub-headings for Gardening</h1>" in client.get("/kb/headings").text
 
 
 def test_headings_page_before_any_notes(client, config):
     page = client.get("/kb/headings").text
-    assert f'data-name="{config.headings[0]}"' in page and not config.notes_path.exists()
+    assert "<h1>Sub-headings</h1>" in page and "data-name=" not in page and not config.notes_path.exists()
 
 
 def test_book_notes_title_defaults_to_the_quote(client, notes, db):

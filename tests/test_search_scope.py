@@ -10,6 +10,7 @@ from book_searchie.indexer import run_index
 from book_searchie.entries import Piece
 from book_searchie.notes import NotesStore
 from book_searchie.web.app import create_app, scope_params, search_scope
+from .conftest import seed_headings
 
 
 @pytest.fixture
@@ -22,6 +23,7 @@ def client(config, db):
 def notes(config, db):
     culpeper = db.conn.execute("SELECT path FROM files WHERE title = 'Culpeper'").fetchone()[0]
     with NotesStore.open(config.notes_path) as store:
+        seed_headings(store)
         store.add_text("Black cohosh", "The root is bitter.",
                        Piece(body="x", path=culpeper, seq=1, label="2", book_title="Culpeper", topic="Herbalism"))
         store.add_text("Tinctures", "# Tincture\nBlack cohosh <b>tincture</b> dose.",

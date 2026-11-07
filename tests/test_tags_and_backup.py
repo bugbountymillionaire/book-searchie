@@ -13,6 +13,7 @@ from book_searchie.indexer import run_index
 from book_searchie.notes import Note, NoteInvalid, NotesStore, Tag
 from book_searchie.notes_backup import RestoreError, export_json, export_markdown_per_entry, restore
 from book_searchie.web.app import create_app
+from .conftest import seed_headings
 
 H = {"X-Book-Searchie": "1"}
 
@@ -20,6 +21,7 @@ H = {"X-Book-Searchie": "1"}
 @pytest.fixture
 def store(config):
     with NotesStore.open(config.notes_path) as s:
+        seed_headings(s)
         yield s
 
 
@@ -151,7 +153,7 @@ def sample(store, db):
     store.add_entry_alias(nettle.id, "Urtica dioica")
     store.add_alias("tag", "Hay fever", "Allergic rhinitis")
     store.set_researched("Nettle", culpeper, True, book_title="Culpeper", topic="Herbalism")
-    store.reorder_headings(["Tea", "Description"])
+    store.reorder_headings("Herbalism", ["Tea", "Description"])
     return culpeper
 
 
@@ -159,9 +161,13 @@ def test_export_json_has_everything(store, db, config):
     run_index(config, db)
     culpeper = sample(store, db)
     data = export_json(store)
-    assert (data["format"], data["version"]) == ("book-searchie-notes", 2)
-    assert data["headings"][:2] == ["Tea", "Description"] and "Soup" in data["headings"]
+    assert (data["format"], data["version"]) == ("book-searchie-notes", 3)
+    lists = {g["topic"]: g["names"] for g in data["headings"]}
+    assert list(lists) == ["Gardening", "Herbalism", "Woodwork", ""]
+    assert lists["Herbalism"][:2] == ["Tea", "Description"] and "Soup" in lists["Herbalism"]
+    assert "Soup" not in lists[""]
     by_title = {e["title"]: e for e in data["entries"]}
+    assert [e["topic"] for e in by_title.values()] == ["Herbalism", "Herbalism", ""]
     assert list(by_title) == ["Black cohosh", "Nettle", "Untagged thought"]
     [book] = by_title["Black cohosh"]["sections"][0]["pieces"]
     assert book["source"] == {"path": culpeper, "seq": 1, "label": "2", "book_title": "Culpeper", "href": None,
@@ -208,7 +214,7 @@ def test_file_names_that_clash_are_numbered(store):
 
 
 def entries_of(store):
-    return [(e.id, e.title, e.aliases, e.tags, e.created, e.updated,
+    return [(e.id, e.title, e.topic, e.aliases, e.tags, e.created, e.updated,
              [(s.heading, [(p.id, p.body, p.source_type, p.path, p.seq, p.source_url, p.created) for p in s.pieces])
               for s in e.sections]) for e in store.all_entries()]
 
@@ -222,7 +228,8 @@ def test_restore_round_trip(store, db, config, tmp_path):
     with NotesStore.open(tmp_path / "restored.db") as fresh:
         assert restore(fresh, data) == 3
         assert entries_of(fresh) == before
-        assert fresh.headings == store.headings
+        assert fresh.heading_topics() == store.heading_topics()
+        assert all(fresh.headings_for(t) == store.headings_for(t) for t in store.heading_topics())
         assert fresh.resolve_tag("tag", "allergic rhinitis") == "Hay fever"
         assert fresh.researched_paths("nettle") == {culpeper}
         found, _ = fresh.search_entries("urtica")
@@ -230,7 +237,7 @@ def test_restore_round_trip(store, db, config, tmp_path):
         assert [h.entry.title for h in fresh.search_entries("rhinitis")[0]] == ["Nettle"]  # tags' other names
         assert [h.entry.title for h in fresh.search_entries("bitter")[0]] == ["Black cohosh"]
         piece, _ = fresh.add_text("Nettle", "More.")
-        assert piece[0].id == max(p[0] for e in before for s in e[6] for p in s[1]) + 1
+        assert piece[0].id == max(p[0] for e in before for s in e[7] for p in s[1]) + 1
 
 
 def test_restore_a_version_1_backup_makes_entries(store, tmp_path):
@@ -242,7 +249,26 @@ def test_restore_a_version_1_backup_makes_entries(store, tmp_path):
         [entry] = fresh.all_entries()
         assert entry.title == "Nettle soup" and entry.sections[0].heading == "Notes"
         assert "Pick the tops." in entry.sections[0].pieces[0].body
-        assert fresh.headings[0] == "Description"
+        assert entry.topic == "Herbalism"  # from its text
+        assert fresh.heading_topics() == ["Herbalism"] and fresh.headings_for("Herbalism") == ["Notes"]
+
+
+def test_restore_a_version_2_backup_sorts_entries_into_topics(tmp_path):
+    def entry(i, title, heading, topic):
+        return {"id": i, "title": title, "sections": [{"heading": heading, "pieces": [
+            {"id": i, "body": "x", "source_type": "own", "topic": topic}]}]}
+
+    data = {"format": "book-searchie-notes", "version": 2, "headings": ["Description", "Tea", "Method"],
+            "entries": [entry(1, "Nettle", "Tea", "Herbalism"), entry(2, "Comfrey", "Description", "Herbalism"),
+                        entry(3, "Water", "Method", "Survival"), entry(4, "Idea", "Thoughts", None)]}
+    with NotesStore.open(tmp_path / "v2.db") as fresh:
+        assert restore(fresh, data) == 4
+        assert [(e.title, e.topic) for e in fresh.all_entries()] == [
+            ("Comfrey", "Herbalism"), ("Idea", ""), ("Nettle", "Herbalism"), ("Water", "Survival")]
+        # The one list goes to the topic most entries are in; others get what their entries use.
+        assert fresh.headings_for("Herbalism") == ["Description", "Tea", "Method"]
+        assert fresh.headings_for("Survival") == ["Method"]
+        assert fresh.headings_for("") == ["Thoughts"]
 
 
 def test_restore_refuses_a_kb_with_entries_unless_replacing(store, db, config):
@@ -297,7 +323,7 @@ def test_cli_export_and_import(store, db, config, tmp_path, capsys, monkeypatch)
     monkeypatch.delenv("BOOK_SEARCHIE_NOTES", raising=False)
 
     assert main(["--config", str(cfg), "notes", "export", str(tmp_path / "b.json")]) == 0
-    assert json.loads((tmp_path / "b.json").read_text(encoding="utf-8"))["version"] == 2
+    assert json.loads((tmp_path / "b.json").read_text(encoding="utf-8"))["version"] == 3
     assert main(["--config", str(cfg), "notes", "export", "--format", "md", str(tmp_path / "md")]) == 0
     assert "*From Culpeper" in (tmp_path / "md" / "Black cohosh.md").read_text(encoding="utf-8")
     assert main(["--config", str(cfg), "notes", "export", "-f", "md", "--book-text", "omit", str(tmp_path / "md2")]) == 0
@@ -379,7 +405,7 @@ def test_export_downloads(client, store, db):
     res = client.get("/kb/export", params={"format": "json"})
     assert res.headers["content-type"] == "application/json"
     assert 'attachment; filename="book-searchie-kb-' in res.headers["content-disposition"]
-    assert res.json()["version"] == 2
+    assert res.json()["version"] == 3
     res = client.get("/kb/export", params={"format": "md"})
     assert res.headers["content-type"] == "application/zip"
     with zipfile.ZipFile(io.BytesIO(res.content)) as zf:

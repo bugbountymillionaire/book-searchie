@@ -2,11 +2,11 @@
 {% block title %}Sub-headings · KB · Book-Searchie{% endblock %}
 {% block content %}
 <p class="crumbs"><a href="/kb">← KB</a></p>
-<h1>Sub-headings</h1>
-<p class="lede">Every entry shows its sub-headings in this order. Drag one, or use ↑ and ↓, to move it.
+<h1>Sub-headings{% if topic %} for {{ topic }}{% endif %}</h1>
+<p class="lede">Every {{ topic ~ " " if topic }}entry shows its sub-headings in this order. Drag one, or use ↑ and ↓, to move it.
   Text saved without a sub-heading goes under the first one.</p>
 
-<ol class="heading-list" id="heading-list">
+<ol class="heading-list" id="heading-list" data-topic="{{ topic }}">
   {% for h in headings %}
   <li class="heading-row" draggable="true" data-name="{{ h.name }}">
     <span class="heading-grip" aria-hidden="true">⠿</span>

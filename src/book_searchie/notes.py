@@ -23,7 +23,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .db import check_fts5
-from .entries import DEFAULT_HEADINGS, EntriesMixin, migrate_to_entries, migrate_to_heading_list
+from .entries import EntriesMixin, migrate_to_entries, migrate_to_heading_list, migrate_to_topic_headings
 from .research import RESEARCH_SCHEMA, ResearchMixin
 from .search import QueryError, prepare_query
 
@@ -101,6 +101,8 @@ _MIGRATIONS = [
     migrate_to_heading_list,
     # 5: books you've finished researching for a search term. See research.py.
     RESEARCH_SCHEMA,
+    # 6: a topic on each entry, and a list of sub-headings per topic. See entries.py.
+    migrate_to_topic_headings,
 ]
 
 # bm25 weights for title, quote, body, source_ref, tags.
@@ -272,8 +274,8 @@ def _best_snippet(row: sqlite3.Row, mark_open: str) -> str:
 class NotesStore(EntriesMixin, ResearchMixin):
     def __init__(self, conn: sqlite3.Connection, headings: list[str] | None = None):
         self.conn = conn
-        # The config's sub-headings, which start the master list in a new notes file.
-        self.seed_headings = list(headings) if headings else list(DEFAULT_HEADINGS)
+        # Sub-headings to start the list with when upgrading from before version 4 (tests).
+        self.seed_headings = list(headings or [])
 
     @classmethod
     def open(cls, path: Path, headings: list[str] | None = None) -> NotesStore:

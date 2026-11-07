@@ -28,6 +28,7 @@ _OPEN, _CLOSE = "\x02", "\x03"
 class EntryIn(BaseModel):
     title: str
     tags: list[str] = Field(default_factory=list)
+    topic: str = ""  # whose sub-headings it uses; "" for none
 
 
 class PieceIn(BaseModel):
@@ -42,6 +43,8 @@ class PieceIn(BaseModel):
     # from somewhere else (both optional)
     source_ref: str | None = None
     source_url: str | None = None
+    # A new entry's topic. Without it, a book's topic, or none.
+    topic: str | None = None
 
 
 class PieceEditIn(BaseModel):
@@ -71,11 +74,17 @@ class HeadingRenameIn(BaseModel):
     new_heading: str
 
 
+class TopicIn(BaseModel):
+    topic: str
+
+
 class HeadingOrderIn(BaseModel):
+    topic: str = ""
     names: list[str]
 
 
 class HeadingNameIn(BaseModel):
+    topic: str = ""
     name: str
     new_name: str
 
@@ -113,12 +122,13 @@ def add_entries_routes(
 
     def summary_json(entry: EntrySummary) -> dict:
         return {"id": entry.id, "title": entry.title, "aliases": entry.aliases, "tags": entry.tags,
-                "headings": entry.headings, "pieces": entry.pieces, "updated": entry.updated}
+                "topic": entry.topic, "headings": entry.headings, "pieces": entry.pieces, "updated": entry.updated}
 
     def entry_json(db: Database, entry: Entry) -> dict:
         ids = file_ids(db, [p for s in entry.sections for p in s.pieces])
         return {
             "id": entry.id, "title": entry.title, "aliases": entry.aliases, "tags": entry.tags,
+            "topic": entry.topic,
             "sections": [{"heading": s.heading, "pieces": [piece_json(p, ids) for p in s.pieces]}
                          for s in entry.sections],
             "created": entry.created, "updated": entry.updated,
@@ -148,7 +158,7 @@ def add_entries_routes(
         """Every entry A to Z with its sub-headings, for the KB's left column."""
         with open_notes(create=False) as store:
             found = store.entry_list(tag=tag or None, topic=topic or None) if store else []
-            headings = store.headings if store else config.headings
+            headings = store.headings_for(topic) if store else []
         return {"entries": [summary_json(e) for e in found], "headings": headings}
 
     @app.get("/api/entries/titles")
@@ -159,21 +169,23 @@ def add_entries_routes(
         return {"titles": titles}
 
     @app.get("/api/entries/lookup")
-    def lookup_entry(title: str):
-        """The entry a title (or other name) goes to, or null if typing it would make a new one."""
+    def lookup_entry(title: str, topic: str = ""):
+        """The entry a title (or other name) goes to, or null if typing it would make a new one
+        (in `topic`), with the sub-headings it would be offered: its own topic's, or `topic`'s."""
         with open_notes(create=False) as store:
             entry_id = store.entry_id(title) if store and title.strip() else None
             found = store.entry_summary(entry_id) if entry_id is not None else None
-            headings = store.headings if store else config.headings
+            headings = store.headings_for(found.topic if found else topic) if store else []
         return {"entry": summary_json(found) if found else None, "headings": headings}
 
     @app.get("/api/headings")
-    def headings():
-        """The master list of sub-headings, in the order entries show them, with how many
-        entries use each. A new notes file starts with the config's list."""
+    def headings(topic: str = ""):
+        """A topic's sub-headings, in the order its entries show them, with how many of its
+        entries use each, and every topic that has sub-headings. A topic starts with none."""
         with open_notes(create=False) as store:
-            found = store.heading_counts() if store else [(h, 0) for h in config.headings]
-        return {"headings": [{"name": name, "entries": n} for name, n in found]}
+            found = store.heading_counts(topic) if store else []
+            topics = store.heading_topics() if store else []
+        return {"topic": topic, "topics": topics, "headings": [{"name": name, "entries": n} for name, n in found]}
 
     @app.get("/api/entries/search")
     def search_entries(q: str, topic: str = "", limit: int = 50, offset: int = 0):
@@ -216,7 +228,7 @@ def add_entries_routes(
     def create_entry(data: EntryIn, x_book_searchie: str | None = Header(default=None)):
         require_app_header(x_book_searchie)
         with open_db() as db, open_notes() as store:
-            return entry_json(db, checked(lambda: store.create_entry(data.title, data.tags)))
+            return entry_json(db, checked(lambda: store.create_entry(data.title, data.tags, data.topic)))
 
     @app.post("/api/pieces", status_code=201)
     def add_piece(data: PieceIn, x_book_searchie: str | None = Header(default=None)):
@@ -233,7 +245,7 @@ def add_entries_routes(
                 piece.source_ref = piece.source_url = None
             text = f"# {data.heading}\n{data.body}" if data.heading.strip() else data.body
             with open_notes() as store:
-                saved, new = checked(lambda: store.add_text(data.title, text, piece))
+                saved, new = checked(lambda: store.add_text(data.title, text, piece, data.topic))
                 ids = file_ids(db, saved)
                 return {"entry_id": saved[0].entry_id, "entry_title": saved[0].entry_title, "new_entry": new,
                         "pieces": [piece_json(p, ids) for p in saved]}
@@ -325,6 +337,14 @@ def add_entries_routes(
             entry_or_404(store, entry_id)
             return {"aliases": checked(lambda: store.add_entry_alias(entry_id, data.alias))}
 
+    @app.put("/api/entries/{entry_id}/topic")
+    def set_topic(entry_id: int, data: TopicIn, x_book_searchie: str | None = Header(default=None)):
+        """Move an entry to another topic: it shows its sub-headings in that topic's order."""
+        require_app_header(x_book_searchie)
+        with open_notes(create=False) as store:
+            entry_or_404(store, entry_id)
+            return {"topic": checked(lambda: store.set_entry_topic(entry_id, data.topic))}
+
     @app.post("/api/entries/{entry_id}/headings/rename")
     def rename_heading(entry_id: int, data: HeadingRenameIn, x_book_searchie: str | None = Header(default=None)):
         """Rename one of an entry's sub-headings; renaming to one it has already merges them."""
@@ -333,29 +353,29 @@ def add_entries_routes(
             entry_or_404(store, entry_id)
             return {"heading": checked(lambda: store.rename_section(entry_id, data.heading, data.new_heading))}
 
-    # --- The master list of sub-headings ----------------------------------------------
+    # --- A topic's list of sub-headings -----------------------------------------------
 
     @app.put("/api/headings/order")
     def order_headings(data: HeadingOrderIn, x_book_searchie: str | None = Header(default=None)):
-        """Reorder the list; every entry shows its sub-headings in this order."""
+        """Reorder a topic's list; its entries show their sub-headings in this order."""
         require_app_header(x_book_searchie)
         with open_notes() as store:
-            store.reorder_headings(data.names)
-            return headings()
+            store.reorder_headings(data.topic, data.names)
+        return headings(data.topic)
 
     @app.post("/api/headings/rename")
     def rename_heading_everywhere(data: HeadingNameIn, x_book_searchie: str | None = Header(default=None)):
-        """Rename a sub-heading in every entry; renaming to one on the list merges the two."""
+        """Rename a sub-heading in every entry in a topic; renaming to one on its list merges the two."""
         require_app_header(x_book_searchie)
         with open_notes() as store:
-            name, merged = checked(lambda: store.rename_heading(data.name, data.new_name))
+            name, merged = checked(lambda: store.rename_heading(data.topic, data.name, data.new_name))
         return {"name": name, "merged": merged}
 
     @app.delete("/api/headings")
-    def remove_heading(name: str, x_book_searchie: str | None = Header(default=None)):
-        """Take a sub-heading that no entry uses off the list."""
+    def remove_heading(name: str, topic: str = "", x_book_searchie: str | None = Header(default=None)):
+        """Take a sub-heading that none of a topic's entries use off its list."""
         require_app_header(x_book_searchie)
         with open_notes() as store:
-            if not checked(lambda: store.remove_heading(name)):
+            if not checked(lambda: store.remove_heading(topic, name)):
                 raise HTTPException(404, "That sub-heading isn't on the list.")
         return {"deleted": name}
