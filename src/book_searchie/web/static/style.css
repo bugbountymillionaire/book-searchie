@@ -251,6 +251,7 @@ body.kb-resizing { cursor: col-resize; user-select: none; }
 .kb-ghost .suggest { color: var(--dim); }
 .kb-ghost .suggest::after { content: "  Tab"; font: 600 0.72rem var(--sans); color: var(--dim); opacity: 0.8; }
 .kb-text-help { margin: 4px 0 0; }
+.kb-text-help.kb-help-empty { color: var(--accent); }
 .kb-heading-menu {
   position: absolute; left: 10px; z-index: 2; min-width: 12rem; max-width: calc(100% - 20px);
   max-height: 14rem; overflow-y: auto; margin: 0; padding: 4px 0; list-style: none;

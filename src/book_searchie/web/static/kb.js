@@ -1,6 +1,7 @@
 // "Save to KB" panel in the viewer: save text from this page to an entry (Nettle), with
 // sub-headings typed in the text ("# Tea"), and see, edit or delete what's already been
-// saved from the page. The panel stays open from page to page (and book to book), keeping
+// saved from the page. The sub-headings offered are the entry's topic's, or for a new
+// entry the book's topic's: each topic has its own list. The panel stays open from page to page (and book to book), keeping
 // the entry and any unsaved text, until it's closed. Its width can be dragged.
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -10,6 +11,7 @@
 
   const fileId = Number(panel.dataset.fileId);
   const seq = Number(panel.dataset.seq);
+  const topic = panel.dataset.topic || ""; // the book's topic: a new entry goes in it
   const form = $("kb-form");
   const entryInput = $("kb-entry");
   const entryState = $("kb-entry-state");
@@ -22,7 +24,7 @@
   let editing = null; // the piece being edited, if any
   let entry = null; // the entry the title goes to, or null for a new one
   let pendingTags = []; // tags for a new entry, given to it once it's saved
-  let headings = []; // the master list of sub-headings, in order
+  let headings = []; // the sub-headings of the entry's topic (or the book's), in order
 
   function say(message, kind) {
     status.textContent = message;
@@ -46,8 +48,26 @@
 
   async function loadHeadings() {
     try {
-      headings = (await call("/api/headings")).headings.map((h) => h.name);
+      headings = (await call(`/api/headings?${new URLSearchParams({ topic })}`)).headings.map((h) => h.name);
+      showHelp();
     } catch (err) { /* suggestions only */ }
+  }
+
+  // Under the text: how sub-headings work, and where text with none goes. A topic with no
+  // sub-headings yet needs one typed, so that's said instead.
+  const help = $("kb-text-help");
+  const kbd = (key) => el("kbd", { textContent: key });
+  function showHelp() {
+    const where = entry ? entry.topic : topic;
+    if (headings.length) {
+      help.replaceChildren("Start a line with ", kbd("#"), " for a sub-heading: pick from the list, or type and ",
+        kbd("Tab"), " to complete. Text before one goes under ", el("strong", { textContent: headings[0] }), ".");
+    } else {
+      help.replaceChildren(where ? `${where} has` : "Entries with no topic have",
+        " no sub-headings yet. Start the text with a ", kbd("#"), " line for one, e.g. ",
+        el("code", { textContent: "# Overview" }), ". It becomes the first on the list.");
+    }
+    help.classList.toggle("kb-help-empty", !headings.length);
   }
 
   // --- Remembering the panel from page to page -----------------------------------------
@@ -94,7 +114,7 @@
       (entryInput.value ? text : entryInput).focus({ preventScroll: true });
     }
     loadPieces();
-    loadHeadings();
+    entryInput.value.trim() ? lookup() : loadHeadings();
     remember();
   }
   function close() {
@@ -217,11 +237,12 @@
     if (!title) {
       entry = null;
       showEntry();
+      loadHeadings();
       return;
     }
     try {
       const [found, titles] = await Promise.all([
-        call(`/api/entries/lookup?${new URLSearchParams({ title })}`),
+        call(`/api/entries/lookup?${new URLSearchParams({ title, topic })}`),
         call(`/api/entries/titles?${new URLSearchParams({ q: title })}`),
       ]);
       if (mine !== lookupSeq) return; // the title has changed since
@@ -229,6 +250,7 @@
       headings = found.headings;
       fill($("kb-entry-list"), titles.titles);
       showEntry();
+      showHelp();
     } catch (err) {
       say(err.message, "error");
     }
@@ -243,6 +265,9 @@
     if (!title) entryState.textContent = "";
     else if (entry && !same(entry.title, title)) entryState.textContent = `goes to ${entry.title}`;
     else entryState.textContent = entry ? "existing entry" : "new entry";
+    // Say the topic when it isn't the book's, or for a new entry, which goes in the book's.
+    const entryTopic = entry ? entry.topic : topic;
+    if (title && entryTopic && (!entry || !same(entryTopic, topic))) entryState.textContent += ` in ${entryTopic}`;
     entryState.className = "kb-entry-state " + (entry || !title ? "dim" : "new");
     showTags();
   }
@@ -469,7 +494,8 @@
     pendingTags = Array.isArray(carried.tags) ? carried.tags : [];
   }
   showEntry();
-  if (entryInput.value.trim()) lookup();
+  // open() looks the entry up (or loads the book's topic's sub-headings) itself.
   if (carried && carried.open) open(true);
+  else if (entryInput.value.trim()) lookup();
   else loadHeadings();
 })();

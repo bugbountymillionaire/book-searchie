@@ -217,3 +217,5 @@ def test_edit_form_keeps_a_topic_no_longer_in_the_library(client, notes):
 def test_viewer_panel_links_scripts(client, db):
     page = client.get(f"/view/{file_row(db, 'Culpeper')['id']}/1").text
     assert "/static/kb.js" in page and "/static/kb_tags.js" not in page
+    # The panel knows the book's topic, so it offers that topic's sub-headings.
+    assert 'data-topic="Herbalism"' in page
