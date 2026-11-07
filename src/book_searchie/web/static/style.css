@@ -194,7 +194,10 @@ a.btn:hover { text-decoration: none; border-color: var(--accent); }
 .small { font-size: 0.85rem; }
 .kb-panel p.small { margin: 4px 0 8px; }
 .kb-existing { margin: 0 0 14px; }
-.kb-existing ul { list-style: none; padding: 0; margin: 0; border: 1px solid var(--line); border-radius: var(--radius); }
+.kb-existing ul {
+  list-style: none; padding: 0; margin: 0; border: 1px solid var(--line); border-radius: var(--radius);
+  max-height: 32vh; overflow-y: auto; overscroll-behavior: contain; /* the form stays in view */
+}
 .kb-existing li { padding: 8px 12px; border-top: 1px solid var(--line); }
 .kb-existing li:first-child { border-top: 0; }
 .kb-note-title { font-family: var(--serif); overflow-wrap: anywhere; }
@@ -216,8 +219,39 @@ a.btn:hover { text-decoration: none; border-color: var(--accent); }
 }
 .kb-form textarea { resize: vertical; }
 .kb-form textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-#kb-quote { font-family: var(--serif); }
-#kb-use-selection { align-self: flex-start; margin-top: 5px; }
+#kb-text { font-family: var(--serif); line-height: 1.45; }
+/* The greyed-out sub-heading suggestion: a copy of the text up to the cursor, laid over the
+   box with the copy invisible, so the suggestion sits just after what's been typed. */
+.kb-text-wrap { position: relative; }
+.kb-text-wrap textarea { display: block; }
+.kb-ghost {
+  position: absolute; top: 0; left: 0; pointer-events: none; overflow: hidden;
+  white-space: pre-wrap; overflow-wrap: break-word; color: transparent; border-color: transparent;
+}
+.kb-ghost .suggest { color: var(--dim); }
+.kb-ghost .suggest::after { content: "  Tab"; font: 600 0.72rem var(--sans); color: var(--dim); opacity: 0.8; }
+.kb-text-help { margin: 4px 0 0; }
+.kb-heading-menu {
+  position: absolute; left: 10px; z-index: 2; min-width: 12rem; max-width: calc(100% - 20px);
+  max-height: 14rem; overflow-y: auto; margin: 0; padding: 4px 0; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.14); font-size: 0.92rem;
+}
+.kb-heading-menu li { padding: 4px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kb-heading-menu li:hover { background: var(--surface-2); }
+.kb-heading-menu li.current { background: var(--accent); color: #fff; }
+.kb-label-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.kb-label-row label { margin-bottom: 3px; }
+.kb-label-row .link-button { padding-right: 0; }
+.kb-entry-state { font-size: 0.85rem; }
+.kb-entry-state.new { color: var(--accent); font-weight: 600; }
+.kb-actions .kb-hint { align-self: center; }
+.kb-entry-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 14px; font-size: 0.9rem; }
+.kb-entry-tags #kb-tag-list { display: contents; }
+.kb-entry-tags input { width: 12rem; padding: 3px 8px; }
+.kb-entry-tags .link-button { padding: 0 2px; }
+.kb-piece-where { font-weight: 600; font-size: 0.9rem; overflow-wrap: anywhere; }
+.kb-piece-text { font: 0.92rem/1.45 var(--serif); color: var(--dim); overflow-wrap: anywhere; margin-top: 2px; }
 .kb-tags {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 3px;
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);

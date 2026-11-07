@@ -21,9 +21,11 @@ def file_id(db, title):
 
 
 def add(client, **kw):
+    """Save text; returns its first piece, with new_entry."""
     res = client.post("/api/pieces", json=kw, headers=H)
     assert res.status_code == 201, res.text
-    return res.json()
+    data = res.json()
+    return {**data["pieces"][0], "new_entry": data["new_entry"]}
 
 
 def test_saving_from_a_book_makes_then_adds_to_the_entry(client, db, config):
@@ -133,7 +135,7 @@ def test_edit_move_and_delete_pieces(client):
     b = add(client, title="Nettle", heading="Tea", body="b")
 
     res = client.put(f"/api/pieces/{a['id']}", json={"body": "a, rewritten"}, headers=H)
-    assert res.status_code == 200 and res.json()["body"] == "a, rewritten"
+    assert res.status_code == 200 and [p["body"] for p in res.json()["pieces"]] == ["a, rewritten"]
     assert client.put(f"/api/pieces/{a['id']}", json={"body": " "}, headers=H).status_code == 400
     assert client.put("/api/pieces/999", json={"body": "x"}, headers=H).status_code == 404
 
@@ -189,3 +191,40 @@ def test_entries_tags_aliases_rename_and_delete(client):
     assert client.delete(f"/api/entries/{eid}", headers=H).json() == {"deleted": eid}
     assert client.delete(f"/api/entries/{eid}", headers=H).status_code == 404
     assert client.get("/api/entries").json()["entries"] == []
+
+
+def test_headings_typed_in_the_text(client, db):
+    fid = file_id(db, "Culpeper")
+    res = client.post("/api/pieces", json={
+        "title": "nettle", "file_id": fid, "seq": 1,
+        "body": "Stings.\n# tea\nA cup a day.\n\n#Hair rinse\nFor shine.\n# Tincture\n",
+    }, headers=H)
+    assert res.status_code == 201
+    data = res.json()
+    assert (data["entry_title"], data["new_entry"]) == ("Nettle", True)
+    assert [(p["heading"], p["body"], p["source"]["type"]) for p in data["pieces"]] == [
+        ("Description", "Stings.", "book"), ("Tea", "A cup a day.", "book"), ("Hair rinse", "For shine.", "book")]
+
+    # A new heading goes on the end of the master list.
+    names = [h["name"] for h in client.get("/api/headings").json()["headings"]]
+    assert names[:2] == ["Description", "Identification"] and names[-1] == "Hair rinse"
+    assert client.get("/api/entries/lookup?title=nettle").json()["headings"] == names
+
+    # Editing: a # line first moves the text, and further ones add text.
+    tea = data["pieces"][1]
+    res = client.put(f"/api/pieces/{tea['id']}", json={"body": "# Infused oil\nIn olive oil.\n# Tea\nTwo cups."},
+                     headers=H).json()
+    assert [(p["heading"], p["body"], p["source"]["type"]) for p in res["pieces"]] == [
+        ("Infused oil", "In olive oil.", "book"), ("Tea", "Two cups.", "book")]
+    entry = client.get(f"/api/entries/{data['entry_id']}").json()
+    assert [s["heading"] for s in entry["sections"]] == ["Description", "Tea", "Infused oil", "Hair rinse"]
+
+    res = client.put(f"/api/pieces/{tea['id']}", json={"body": "# Tea\n"}, headers=H)
+    assert res.status_code == 400 and "delete it" in res.json()["error"]
+    res = client.post("/api/pieces", json={"title": "Nettle", "body": "# Tea\n\n# Tincture"}, headers=H)
+    assert res.status_code == 400 and "no text" in res.json()["error"]
+
+
+def test_headings_before_there_is_a_notes_file(client, config):
+    assert [h["name"] for h in client.get("/api/headings").json()["headings"]] == config.headings
+    assert not config.notes_path.exists()

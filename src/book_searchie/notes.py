@@ -23,7 +23,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .db import check_fts5
-from .entries import DEFAULT_HEADINGS, EntriesMixin, migrate_to_entries
+from .entries import DEFAULT_HEADINGS, EntriesMixin, migrate_to_entries, migrate_to_heading_list
 from .search import QueryError, prepare_query
 
 SOURCE_TYPES = ("book", "other", "own")
@@ -96,6 +96,8 @@ _MIGRATIONS = [
     # 3: entries (Nettle) with sub-headings and pieces of text, which replace notes. Notes are
     # converted, and kept until the screens that use them are replaced. See entries.py.
     migrate_to_entries,
+    # 4: the master list of sub-headings and their order, which you can change in the KB.
+    migrate_to_heading_list,
 ]
 
 # bm25 weights for title, quote, body, source_ref, tags.
@@ -267,8 +269,8 @@ def _best_snippet(row: sqlite3.Row, mark_open: str) -> str:
 class NotesStore(EntriesMixin):
     def __init__(self, conn: sqlite3.Connection, headings: list[str] | None = None):
         self.conn = conn
-        # The sub-headings entries use, in the order they're shown (from the config).
-        self.headings = list(headings) if headings else list(DEFAULT_HEADINGS)
+        # The config's sub-headings, which start the master list in a new notes file.
+        self.seed_headings = list(headings) if headings else list(DEFAULT_HEADINGS)
 
     @classmethod
     def open(cls, path: Path, headings: list[str] | None = None) -> NotesStore:

@@ -204,12 +204,9 @@ def test_api(client, store, ollama):
 
 
 def test_button_only_when_switched_on(client, db, ai_config):
-    fid = db.conn.execute("SELECT id FROM files WHERE title = 'Culpeper'").fetchone()[0]
-    assert 'id="kb-suggest"' in client.get(f"/view/{fid}/1").text
     assert 'id="kb-suggest"' in client.get("/kb/new").text
     ai_config.ai_enabled = False
     off = TestClient(create_app(ai_config, allowed_hosts=["testserver"]))
-    assert 'id="kb-suggest"' not in off.get(f"/view/{fid}/1").text
     assert 'id="kb-suggest"' not in off.get("/kb/new").text
     res = off.post("/api/ai/suggest-tags", json={"body": "x"}, headers=H)
     assert res.status_code == 404 and "suggestions are off" in res.json()["error"]

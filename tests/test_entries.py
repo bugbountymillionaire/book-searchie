@@ -258,7 +258,7 @@ def test_entry_tags_work_with_tag_tidying(store):
 
 
 def test_entry_list_is_a_to_z_with_headings(store):
-    store.add_piece("yarrow", "Poultice", Piece(body="a"))
+    store.add_piece("yarrow", "Poultice", Piece(body="a"))  # made as Yarrow
     store.add_piece("Birch Tree", "Tea", Piece(body="b"))
     store.add_piece("Birch Tree", "Description", Piece(body="c"))
     store.add_piece("Nettle", "Tea", from_book("d"))
@@ -267,13 +267,15 @@ def test_entry_list_is_a_to_z_with_headings(store):
     listing = store.entry_list()
     assert [(e.title, e.headings, e.pieces) for e in listing] == [
         ("Birch Tree", ["Description", "Tea"], 2), ("Comfrey", [], 0), ("Nettle", ["Tea"], 1),
-        ("yarrow", ["Poultice"], 1)]
+        ("Yarrow", ["Poultice"], 1)]
     assert [e.title for e in store.entry_list(tag="wounds")] == ["Comfrey"]
     assert [e.title for e in store.entry_list(tag="Nothing")] == []
     assert [e.title for e in store.entry_list(topic="herbalism")] == ["Nettle"]
     assert store.entry_titles("b") == ["Birch Tree"]
     assert store.entry_titles("50%") == []
-    assert [e.title for e in store.all_entries()] == ["Birch Tree", "Comfrey", "Nettle", "yarrow"]
+    assert [e.title for e in store.all_entries()] == ["Birch Tree", "Comfrey", "Nettle", "Yarrow"]
+    assert store.create_entry("birch sap").title == "Birch sap"
+    assert store.create_entry("pH balance").title == "pH balance"  # has capitals: kept as typed
 
 
 def test_search_puts_title_matches_first_and_shows_where(store):
@@ -351,7 +353,8 @@ def _v2_file(path):
     assert store.entry_count() == 0  # notes made now aren't entries
     store.conn.executescript(
         "DROP TABLE entries_fts; DROP TABLE sections_fts; DROP TABLE entry_tags; DROP TABLE pieces;"
-        " DROP TABLE sections; DROP TABLE entry_aliases; DROP TABLE entries; PRAGMA user_version = 2;"
+        " DROP TABLE sections; DROP TABLE entry_aliases; DROP TABLE entries; DROP TABLE headings;"
+        " PRAGMA user_version = 2;"
     )
     store.close()
 
@@ -367,6 +370,7 @@ def test_upgrading_converts_notes_to_entries(tmp_path):
 
         entry = s.find_entry("NETTLES FOR JOINT ACHES")
         assert entry.headings == [CONVERTED_HEADING]
+        assert s.headings == [*DEFAULT_HEADINGS, CONVERTED_HEADING]  # the config list, then the rest
         first, second = entry.sections[0].pieces
         assert first.body == "An handful of the leaves of green Nettles.\n\nTry it."
         assert (first.source_type, first.path, first.seq, first.label, first.href, first.topic) == (
@@ -417,3 +421,64 @@ def test_headings_config(tmp_path):
         cfg.write_text(f'[library]\nroots = ["lib"]\n[notes]\nheadings = {bad}\n', encoding="utf-8")
         with pytest.raises(ConfigError, match=message):
             load_config(cfg)
+
+
+# --- sub-headings typed in the text, and the master list ---
+
+
+def test_split_headings():
+    from book_searchie.entries import split_headings
+
+    assert split_headings("Plain text.") == [(None, "Plain text.")]
+    assert split_headings("Intro\n# Tea \nA cup.\n  ## Tincture ##\nDrops.\n#\tPoultice\n\n") == [
+        (None, "Intro"), ("Tea", "A cup."), ("Tincture", "Drops.")]
+    assert split_headings("#Tea\r\nA cup.\r\n\r\nMore.") == [("Tea", "A cup.\r\n\r\nMore.".replace("\r", ""))]
+    assert split_headings("# \nText") == [(None, "# \nText")]  # a # with no name is just text
+    assert split_headings("   \n# Tea\n") == []
+
+
+def test_add_text_with_headings(store):
+    pieces, new = store.add_text("nettle", "Stings.\n# tea\nA cup.\n# Hair rinse\nFor shine.", from_book(""))
+    assert new
+    assert [(p.entry_title, p.heading, p.body, p.source_type) for p in pieces] == [
+        ("Nettle", "Description", "Stings.", "book"), ("Nettle", "Tea", "A cup.", "book"),
+        ("Nettle", "Hair rinse", "For shine.", "book")]
+    assert store.headings[-1] == "Hair rinse"  # remembered at the end of the list
+    _, new = store.add_text("Nettle", "# hair RINSE\nAgain.")
+    assert not new
+    assert store.find_entry("Nettle").headings == ["Description", "Tea", "Hair rinse"]
+    assert store.heading_counts()[-1] == ("Hair rinse", 1)
+    with pytest.raises(EntryInvalid, match="no text"):
+        store.add_text("Nettle", "# Tea\n")
+    with pytest.raises(EntryInvalid, match="at most 80"):
+        store.add_text("Nettle", "# " + "x" * 81 + "\nText")
+    assert store.conn.execute("SELECT COUNT(*) FROM pieces").fetchone()[0] == 4  # nothing half-saved
+
+
+def test_entries_show_headings_in_the_lists_order(store):
+    store.add_text("Nettle", "# Cautions\na\n# Tea\nb\n# Description\nc")
+    assert store.find_entry("Nettle").headings == ["Description", "Tea", "Cautions"]
+    # Reordering the list (the Sub-headings page, later) reorders every entry.
+    store.conn.execute("UPDATE headings SET position = -1 WHERE name = 'Cautions'")
+    assert store.find_entry("Nettle").headings == ["Cautions", "Description", "Tea"]
+    assert store.entry_list()[0].headings == ["Cautions", "Description", "Tea"]
+    assert store.default_heading == "Cautions"
+
+
+def test_edit_text(store):
+    (piece,), _ = store.add_text("Nettle", "# Tea\nA cup.", from_book(""))
+    edited = store.edit_text(piece.id, "A cup, rewritten.")
+    assert [(p.heading, p.body) for p in edited] == [("Tea", "A cup, rewritten.")]
+    edited = store.edit_text(piece.id, "# Tincture\nDrops.\n# Poultice\nLeaves.")
+    assert [(p.heading, p.body, p.path) for p in edited] == [("Tincture", "Drops.", BOOK), ("Poultice", "Leaves.", BOOK)]
+    assert store.find_entry("Nettle").headings == ["Tincture", "Poultice"]  # Tea had nothing left
+    assert store.edit_text(999, "x") is None
+    with pytest.raises(EntryInvalid, match="delete it"):
+        store.edit_text(piece.id, "# Tea")
+
+
+def test_new_file_heading_list_comes_from_the_config(tmp_path):
+    with NotesStore.open(tmp_path / "n.db", ["Uses", "Growing"]) as s:
+        assert s.headings == ["Uses", "Growing"]
+    with NotesStore.open(tmp_path / "n.db", ["Changed"]) as s:
+        assert s.headings == ["Uses", "Growing"]  # after that, the list is in the KB

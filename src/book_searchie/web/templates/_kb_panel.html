@@ -1,11 +1,10 @@
 {# "Save to KB" side panel for the viewer. kb.js does the work. #}
 <aside class="kb-panel" id="kb-panel" hidden aria-labelledby="kb-heading"
-       data-file-id="{{ book.id }}" data-seq="{{ seq }}" data-kinds="{{ tag_kinds|tojson|forceescape }}">
+       data-file-id="{{ book.id }}" data-seq="{{ seq }}">
   <div class="kb-head">
     <h2 id="kb-heading">Save to KB</h2>
     <button type="button" class="kb-close" id="kb-close" title="Close (Esc)" aria-label="Close">×</button>
   </div>
-  <p class="kb-source dim">From <strong>{{ book.title }}</strong>, {{ ('page ' ~ label) if book.kind == 'pdf' else label }}</p>
 
   <section class="kb-existing" id="kb-existing" hidden>
     <h3>Saved from this {{ 'page' if book.kind == 'pdf' else 'chapter' }} <span class="dim" id="kb-existing-count"></span></h3>
@@ -13,52 +12,51 @@
   </section>
 
   {% if book.kind == 'pdf' %}
-  <details class="kb-page-text" open>
+  <details class="kb-page-text">
     <summary>Text on this page</summary>
     {% if page_text %}
-    <p class="dim small">Select some of it, then press <em>Use selected text</em>.</p>
+    <p class="dim small">Select some of it, then press <kbd>s</kbd>.</p>
     <div class="kb-text" id="kb-page-text" tabindex="0">{{ page_text }}</div>
     {% else %}
-    <p class="dim small">This page has no text to quote from{{ ' yet: it may need OCR' if book.status == 'no_text' }}. You can still type a quote or a note.</p>
+    <p class="dim small">This page has no text to select{{ ' yet: it may need OCR' if book.status == 'no_text' }}. You can still type.</p>
     {% endif %}
   </details>
-  {% else %}
-  <p class="dim small">Select text in the chapter, then press <em>Use selected text</em>.</p>
   {% endif %}
 
   <form id="kb-form" class="kb-form" autocomplete="off">
-    <label for="kb-quote">Quote</label>
-    <textarea id="kb-quote" name="quote" rows="4" placeholder="Words from the book"></textarea>
-    <button type="button" class="small" id="kb-use-selection">Use selected text</button>
-
-    <label for="kb-title">Title <span class="dim">(optional)</span></label>
-    <input id="kb-title" name="title" maxlength="200" placeholder="Leave blank to use the start of the quote">
-
-    {% for kind in tag_kinds %}
-    <label for="kb-tag-{{ kind }}">{{ kind|capitalize }}</label>
-    <div class="kb-tags" data-kind="{{ kind }}">
-      <span class="kb-chips"></span>
-      <input id="kb-tag-{{ kind }}" list="kb-list-{{ kind }}" maxlength="60" placeholder="Type, then Enter">
-      <datalist id="kb-list-{{ kind }}"></datalist>
+    <div class="kb-label-row">
+      <label for="kb-entry">Entry</label>
+      <span class="kb-entry-state dim" id="kb-entry-state" aria-live="polite"></span>
     </div>
-    {% endfor %}
-    {% if ai_enabled %}
-    <div class="kb-suggest">
-      <button type="button" class="small" id="kb-suggest">Suggest tags</button>
-      <div id="kb-suggest-area" aria-live="polite"></div>
-    </div>
-    {% endif %}
+    <input id="kb-entry" name="title" maxlength="200" list="kb-entry-list" placeholder="e.g. Nettle" required>
+    <datalist id="kb-entry-list"></datalist>
 
-    <label for="kb-body">Your notes</label>
-    <textarea id="kb-body" name="body" rows="6"></textarea>
-    <p class="dim small">Formatting: **bold**, *italic*, lines starting "- " for a list, [text](https://…) for a link.</p>
+    <div class="kb-label-row">
+      <label for="kb-text">Text</label>
+      <button type="button" class="link-button small" id="kb-use-selection" title="Add the text you've selected (s)">Add selected text</button>
+    </div>
+    <div class="kb-text-wrap">
+      <textarea id="kb-text" name="body" rows="10" spellcheck="true" aria-describedby="kb-text-help"
+                placeholder="Select text in the book and press s, or type your own."></textarea>
+      <div class="kb-ghost" id="kb-ghost" aria-hidden="true"></div>
+      <ul class="kb-heading-menu" id="kb-heading-menu" role="listbox" aria-label="Sub-headings" hidden></ul>
+    </div>
+    <p class="dim small kb-text-help" id="kb-text-help">Start a line with <kbd>#</kbd> for a sub-heading: pick from the list, or type and <kbd>Tab</kbd> to complete.</p>
 
     <p class="kb-status" id="kb-status" role="status"></p>
     <div class="kb-actions">
-      <button type="submit" class="primary" id="kb-save">Save to KB</button>
+      <button type="submit" class="primary" id="kb-save">Save</button>
       <button type="button" id="kb-cancel-edit" hidden>Cancel edit</button>
+      <span class="dim small kb-hint">Ctrl+Enter</span>
+    </div>
+
+    <div class="kb-entry-tags" id="kb-entry-tags">
+      <span class="dim" id="kb-tags-label">Tags</span>
+      <span id="kb-tag-list"></span>
+      <button type="button" class="link-button small" id="kb-tag-add">+ add</button>
+      <input id="kb-tag-input" maxlength="60" list="kb-tag-options" placeholder="Tag, then Enter" hidden>
+      <datalist id="kb-tag-options"></datalist>
     </div>
   </form>
 </aside>
-<script src="/static/kb_tags.js?v={{ static_version }}"></script>
 <script src="/static/kb.js?v={{ static_version }}"></script>

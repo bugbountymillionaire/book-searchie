@@ -166,4 +166,4 @@ def test_edit_form_keeps_a_topic_no_longer_in_the_library(client, notes):
 
 def test_viewer_panel_links_scripts(client, db):
     page = client.get(f"/view/{file_row(db, 'Culpeper')['id']}/1").text
-    assert page.index("/static/kb_tags.js") < page.index("/static/kb.js")
+    assert "/static/kb.js" in page and "/static/kb_tags.js" not in page

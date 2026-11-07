@@ -32,7 +32,9 @@ class EntryIn(BaseModel):
 
 class PieceIn(BaseModel):
     title: str  # the entry: made if there isn't one with this title or other name
-    heading: str = ""  # empty: the first sub-heading in the config
+    # Lines starting with # in the body are sub-headings for the text after them. Text
+    # before any goes under `heading`, or if that's empty the first sub-heading on the list.
+    heading: str = ""
     body: str
     # from a book: its id in the index and its page (PDF) or spine position (EPUB)
     file_id: int | None = None
@@ -43,7 +45,7 @@ class PieceIn(BaseModel):
 
 
 class PieceEditIn(BaseModel):
-    body: str
+    body: str  # may start with a # line to move it to another sub-heading; more # lines add text
 
 
 class PieceMoveIn(BaseModel):
@@ -137,7 +139,8 @@ def add_entries_routes(
         """Every entry A to Z with its sub-headings, for the KB's left column."""
         with open_notes(create=False) as store:
             found = store.entry_list(tag=tag or None, topic=topic or None) if store else []
-        return {"entries": [summary_json(e) for e in found], "headings": config.headings}
+            headings = store.headings if store else config.headings
+        return {"entries": [summary_json(e) for e in found], "headings": headings}
 
     @app.get("/api/entries/titles")
     def entry_titles(q: str = "", limit: int = 10):
@@ -152,7 +155,16 @@ def add_entries_routes(
         with open_notes(create=False) as store:
             entry_id = store.entry_id(title) if store and title.strip() else None
             found = store.entry_summary(entry_id) if entry_id is not None else None
-        return {"entry": summary_json(found) if found else None, "headings": config.headings}
+            headings = store.headings if store else config.headings
+        return {"entry": summary_json(found) if found else None, "headings": headings}
+
+    @app.get("/api/headings")
+    def headings():
+        """The master list of sub-headings, in the order entries show them, with how many
+        entries use each. A new notes file starts with the config's list."""
+        with open_notes(create=False) as store:
+            found = store.heading_counts() if store else [(h, 0) for h in config.headings]
+        return {"headings": [{"name": name, "entries": n} for name, n in found]}
 
     @app.get("/api/entries/search")
     def search_entries(q: str, topic: str = "", limit: int = 50, offset: int = 0):
@@ -199,7 +211,8 @@ def add_entries_routes(
 
     @app.post("/api/pieces", status_code=201)
     def add_piece(data: PieceIn, x_book_searchie: str | None = Header(default=None)):
-        """Add text to the end of an entry's sub-heading, making the entry if it's new."""
+        """Add text to an entry, making the entry if it's new. Each part goes to the end of
+        its sub-heading."""
         require_app_header(x_book_searchie)
         with open_db() as db:
             piece = Piece(body=data.body, source_ref=data.source_ref, source_url=data.source_url)
@@ -209,20 +222,24 @@ def add_entries_routes(
                 for name, value in book_source(db, config, data.file_id, data.seq).items():
                     setattr(piece, name, value)
                 piece.source_ref = piece.source_url = None
+            text = f"# {data.heading}\n{data.body}" if data.heading.strip() else data.body
             with open_notes() as store:
-                created = store.entry_id(data.title) is None if data.title.strip() else False
-                saved = checked(lambda: store.add_piece(data.title, data.heading or None, piece))
-                return {**piece_json(saved, file_ids(db, [saved])), "new_entry": created}
+                saved, new = checked(lambda: store.add_text(data.title, text, piece))
+                ids = file_ids(db, saved)
+                return {"entry_id": saved[0].entry_id, "entry_title": saved[0].entry_title, "new_entry": new,
+                        "pieces": [piece_json(p, ids) for p in saved]}
 
     @app.put("/api/pieces/{piece_id}")
     def edit_piece(piece_id: int, data: PieceEditIn, x_book_searchie: str | None = Header(default=None)):
-        """Change a piece's text. Where it came from stays as it was."""
+        """Change a piece's text. Where it came from stays as it was. Returns the piece, then
+        any pieces added by # lines after the first."""
         require_app_header(x_book_searchie)
         with open_db() as db, open_notes(create=False) as store:
-            saved = checked(lambda: store.update_piece(piece_id, data.body)) if store else None
+            saved = checked(lambda: store.edit_text(piece_id, data.body)) if store else None
             if saved is None:
                 raise HTTPException(404, "That text isn't in your KB. It may have been deleted.")
-            return piece_json(saved, file_ids(db, [saved]))
+            ids = file_ids(db, saved)
+            return {"pieces": [piece_json(p, ids) for p in saved]}
 
     @app.post("/api/pieces/{piece_id}/move")
     def move_piece(piece_id: int, data: PieceMoveIn, x_book_searchie: str | None = Header(default=None)):

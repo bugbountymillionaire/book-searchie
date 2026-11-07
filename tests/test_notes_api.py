@@ -196,15 +196,17 @@ def test_pdf_viewer_has_the_panel_and_page_text(client, db, library, config):
     fid = file_id(db, "Html")
     page = client.get(f"/view/{fid}/0", params={"q": "cohosh"}).text
     assert 'id="kb-panel"' in page and 'id="kb-open"' in page and "/static/kb.js" in page
-    assert 'data-kinds="[&#34;plant&#34;, &#34;condition&#34;]"' in page
-    assert 'for="kb-tag-plant"' in page and 'for="kb-tag-condition"' in page
+    # Entry and Text (sub-headings are typed in it): no quote box, sub-heading box or tag kinds.
+    assert 'id="kb-entry"' in page and 'id="kb-text"' in page and 'id="kb-ghost"' in page
+    assert 'id="kb-heading-input"' not in page
+    assert 'id="kb-quote"' not in page and 'for="kb-tag-plant"' not in page
     assert '<div class="kb-text" id="kb-page-text" tabindex="0">Black <mark>cohosh</mark> &lt;b&gt;root&lt;/b&gt; &amp; more</div>' in page
 
 
 def test_epub_viewer_has_the_panel_without_page_text(client, db):
     page = client.get(f"/view/{file_id(db, 'Modern Herbal')}/0").text
     assert 'id="kb-panel"' in page and 'id="kb-page-text"' not in page
-    assert "Select text in the chapter" in page
+    assert 'id="kb-use-selection"' in page
 
 
 def test_note_on_a_page_without_text(client, db, library, config):
@@ -213,7 +215,7 @@ def test_note_on_a_page_without_text(client, db, library, config):
     make_pdf(library / "Herbalism" / "Plates.pdf", ["Plate one, nettle.", "", "Plate three."])
     run_index(config, db)
     fid = file_id(db, "Plates")
-    assert "This page has no text to quote from" in client.get(f"/view/{fid}/1").text
+    assert "This page has no text to select" in client.get(f"/view/{fid}/1").text
     res = client.post("/api/notes", json=book(db, file_id=fid, seq=1, quote="", body="A drawing of nettle."), headers=H)
     assert res.status_code == 201 and res.json()["label"] == "2"
     res = client.post("/api/notes", json=book(db, file_id=fid, seq=7, body="x"), headers=H)
