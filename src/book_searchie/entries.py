@@ -323,6 +323,23 @@ class EntriesMixin:
         topics = [r[0] for r in self.conn.execute("SELECT DISTINCT topic FROM headings")]
         return sorted(topics, key=lambda t: (t == "", t.casefold()))
 
+    def used_topics(self) -> list[str]:
+        """Every topic an entry is in or that has sub-headings, A to Z, with no topic ('')
+        left out."""
+        topics = {r[0] for r in self.conn.execute(
+            "SELECT topic FROM headings UNION SELECT topic FROM entries")} - {""}
+        return sorted(topics, key=str.casefold)
+
+    def topic_name(self, topic: str | None, known: list[str] = ()) -> str:
+        """A typed topic with the spelling it already has (in the library, given as `known`,
+        or in the KB). A new one typed all in small letters gets a capital: "survival" is
+        Survival."""
+        topic = _norm(topic)
+        for name in [*known, *self.used_topics()]:
+            if name.casefold() == topic.casefold():
+                return name
+        return topic[:1].upper() + topic[1:] if topic == topic.lower() else topic
+
     def _remember_heading(self, topic: str | None, heading: str) -> None:
         """Add a sub-heading to the end of a topic's list, if it isn't on it."""
         try:
@@ -399,6 +416,7 @@ class EntriesMixin:
 
     def create_entry(self, title: str, tags: list[str] = (), topic: str | None = None) -> Entry:
         title = clean_title(title)
+        topic = self.topic_name(topic)
         with self.conn:
             if self.entry_id(title) is not None:
                 raise EntryInvalid(f"There's already an entry called \"{title}\" (or with that as another name).")
@@ -419,7 +437,7 @@ class EntriesMixin:
     def set_entry_topic(self, entry_id: int, topic: str | None) -> str:
         """Move an entry to another topic. Its sub-headings are added to that topic's list
         if they aren't on it. Returns the topic."""
-        topic = _norm(topic)
+        topic = self.topic_name(topic)
         with self.conn:
             entry = self.get_entry(entry_id)
             if entry is None:

@@ -53,7 +53,7 @@
 
     <div class="kb-side-actions">
       <button type="button" class="btn" id="kb-new-entry">New entry</button>
-      <a class="btn subtle" href="/kb/headings">Sub-headings</a>
+      <a class="btn subtle" href="/kb/headings{% if current %}?{{ {'topic': current.entry.topic}|urlencode }}{% endif %}">Sub-headings</a>
       <a class="btn subtle" href="/kb/tags">Tags and backup</a>
     </div>
   </nav>

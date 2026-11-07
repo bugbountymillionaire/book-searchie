@@ -5,7 +5,7 @@
   const $ = (id) => document.getElementById(id);
   const HEADERS = { "Content-Type": "application/json", "X-Book-Searchie": "1" };
   const el = (tag, props) => Object.assign(document.createElement(tag), props);
-  let headings = []; // the master list of sub-headings, for typing them after #
+  let headings = []; // the open entry's topic's sub-headings, for typing them after #
   let editors = 0;
 
   async function call(url, options) {
@@ -22,9 +22,11 @@
   const send = (method, url, body) =>
     call(url, { method, headers: HEADERS, body: body === undefined ? undefined : JSON.stringify(body) });
 
+  const entryTopic = () => ($("kb-entry").dataset.topic || "");
   async function loadHeadings() {
+    if (!$("kb-entry").dataset.entryId) return;
     try {
-      headings = (await call("/api/headings")).headings.map((h) => h.name);
+      headings = (await call(`/api/headings?${new URLSearchParams({ topic: entryTopic() })}`)).headings.map((h) => h.name);
     } catch (err) { /* suggestions only */ }
   }
 
@@ -60,21 +62,36 @@
     if (side && matchMedia("(max-width: 799px)").matches && $("kb-entry").dataset.entryId) side.open = false;
   }
 
-  async function newEntry() {
-    const title = (prompt("New entry's title, e.g. Nettle:") || "").trim();
+  // New entry: a title and a topic (the open entry's to start with), whose sub-headings it uses.
+  const newDialog = $("kb-new-dialog");
+  const newForm = $("kb-new-form");
+  const newStatus = newForm.querySelector(".kb-status");
+  function newEntry() {
+    newForm.reset();
+    newStatus.textContent = "";
+    newForm.elements.topic.value = $("kb-entry").dataset.entryId ? entryTopic() : "";
+    newDialog.showModal();
+    newForm.elements.title.focus();
+  }
+  newForm.querySelector("[data-close]").addEventListener("click", () => newDialog.close());
+  newForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const title = newForm.elements.title.value.trim();
+    const topic = newForm.elements.topic.value.trim();
     if (!title) return;
+    const button = newForm.querySelector("button[type=submit]");
+    button.disabled = true;
     try {
       const found = (await call(`/api/entries/lookup?${new URLSearchParams({ title })}`)).entry;
-      if (found) {
-        location.href = `/kb/entry/${found.id}`; // it already exists: go to it
-        return;
-      }
-      const entry = await send("POST", "/api/entries", { title, tags: [] });
+      // It already exists: go to it.
+      const entry = found || await send("POST", "/api/entries", { title, tags: [], topic });
       location.href = `/kb/entry/${entry.id}`;
     } catch (err) {
-      alert(err.message);
+      newStatus.textContent = err.message;
+      newStatus.className = "kb-status error";
+      button.disabled = false;
     }
-  }
+  });
 
   // --- Refreshing after a change -----------------------------------------------------
   function partUrl(part) {
@@ -107,6 +124,7 @@
     wireList();
     markSearchWords();
     showSuggestions();
+    loadHeadings(); // the topic may have changed
     window.scrollTo(0, y);
   }
   async function change(action) {
@@ -139,6 +157,11 @@
     const menu = form.querySelector(".kb-heading-menu");
     menu.id = `kb-editor-menu-${++editors}`;
     KbHeadingText(box, form.querySelector(".kb-ghost"), menu, () => headings);
+    if (!headings.length) {
+      // The entry's topic has no sub-headings yet: the text has to start one.
+      const topic = entryTopic();
+      box.placeholder = `${topic ? topic + " has" : "Entries with no topic have"} no sub-headings yet. Start with a # line for one, e.g. # Overview.`;
+    }
     if (!withSource) form.querySelector(".kb-editor-source").remove();
     const status = form.querySelector(".kb-status");
 
@@ -201,6 +224,8 @@
           location.href = `/kb/entry/${res.id}${params.toString() ? "?" + params : ""}`;
         })
         .catch((err) => alert(err.message));
+    } else if (act === "change-topic") {
+      changeTopic(button.closest(".kb-topic-line"), entryId);
     } else if (act === "delete-entry") {
       if (!confirm(`Delete ${title} and all its text from your KB? This can't be undone.`)) return;
       send("DELETE", `/api/entries/${entryId}`)
@@ -267,6 +292,37 @@
       change(() => send("DELETE", `/api/pieces/${pieceId}`));
     }
   });
+
+  // Change the open entry's topic: a box in place of the topic line, offering the topics there are.
+  function changeTopic(line, entryId) {
+    const form = el("form", { className: "kb-topic-form" });
+    const input = el("input", { value: entryTopic(), maxLength: 200, placeholder: "No topic", autocomplete: "off" });
+    input.setAttribute("list", "kb-topic-list");
+    input.setAttribute("aria-label", "Topic");
+    const status = el("span", { className: "kb-status" });
+    status.setAttribute("role", "status");
+    const cancel = el("button", { type: "button", className: "small", textContent: "Cancel" });
+    const close = () => { form.remove(); line.hidden = false; };
+    form.append(el("span", { className: "dim", textContent: "Topic" }), input,
+      el("button", { type: "submit", className: "small", textContent: "Save" }), cancel, status);
+    cancel.addEventListener("click", close);
+    input.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (input.value.trim() === entryTopic()) return close();
+      try {
+        await send("PUT", `/api/entries/${entryId}/topic`, { topic: input.value });
+        await refresh();
+      } catch (err) {
+        status.textContent = err.message;
+        status.className = "kb-status error";
+      }
+    });
+    line.hidden = true;
+    line.after(form);
+    input.focus();
+    input.select();
+  }
 
   // AI tag suggestions for the open entry, kept while you add them one at a time.
   let suggested = null;

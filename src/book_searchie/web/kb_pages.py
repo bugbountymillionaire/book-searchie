@@ -22,7 +22,7 @@ from ..entries import Entry
 from ..notes import Note
 from ..notes_backup import BOOK_TEXT, export_json_text, export_markdown_per_entry
 from ..search import QueryError
-from .entries_api import _CLOSE, _OPEN, snippet_html
+from .entries_api import _CLOSE, _OPEN, library_topics, snippet_html
 from .notes_api import file_ids, open_notes_for
 
 NOTES_PER_PAGE = 20
@@ -77,6 +77,13 @@ def entry_view(db: Database, entry: Entry) -> dict:
     return {"entry": entry, "sections": sections}
 
 
+def topic_names(db: Database, store) -> list[str]:
+    """Every topic, for picking one: the library's and any only the KB uses, A to Z."""
+    names = {t.casefold(): t for t in (store.used_topics() if store else [])}
+    names.update({t.casefold(): t for t in library_topics(db)})  # the library's spelling wins
+    return sorted(names.values(), key=str.casefold)
+
+
 def add_kb_pages(app: FastAPI, config: Config, open_db: Callable[[], Database], page: Callable) -> None:
     def views(db: Database, notes: list[Note]) -> list[dict]:
         ids = file_ids(db, notes)
@@ -121,6 +128,7 @@ def add_kb_pages(app: FastAPI, config: Config, open_db: Callable[[], Database], 
             context = dict(
                 section="kb", kb_q=q, tag=tag, entries=entries, hits=hits, error=error, current=current,
                 total=store.entry_count() if store else 0, heading_id=heading_id,
+                topic_names=topic_names(db, store),
             )
             name = {"entry": "_kb_entry.html", "list": "_kb_list.html"}.get(part, "kb.html")
             return page(request, name, db, **context)
@@ -136,13 +144,23 @@ def add_kb_pages(app: FastAPI, config: Config, open_db: Callable[[], Database], 
     @app.get("/kb/headings")
     def kb_headings(request: Request, topic: str | None = None):
         """A topic's list of sub-headings (the first topic with any, unless one is asked
-        for): reorder, rename and merge, remove."""
+        for): reorder, rename and merge, remove. A picker above it goes to the others."""
         with open_db() as db, open_notes_for(config, create=False) as store:
-            topics = store.heading_topics() if store else []
-            if topic is None:
-                topic = topics[0] if topics else ""
+            with_headings = store.heading_topics() if store else []
+            # Every topic to pick from, with how many sub-headings it has; "No topic" only
+            # when entries with no topic have some.
+            names = topic_names(db, store) + ([""] if "" in with_headings else [])
+            if topic is None:  # the first topic with sub-headings, or the first there is
+                topic = with_headings[0] if with_headings else names[0] if names else ""
+            topic = store.topic_name(topic, library_topics(db)) if store else " ".join(topic.split())
             found = store.heading_counts(topic) if store else []
-            return page(request, "kb_headings.html", db, section="kb", topic=topic, topics=topics,
+            if topic.casefold() not in {n.casefold() for n in names}:
+                names.append(topic)
+            picker = [{"name": n, "label": n or "No topic", "current": n.casefold() == topic.casefold(),
+                       "count": len(store.headings_for(n)) if store else 0,
+                       "url": "/kb/headings?" + urlencode({"topic": n})} for n in names]
+            # heading_topic, not topic: that's the search box's topic.
+            return page(request, "kb_headings.html", db, section="kb", heading_topic=topic, picker=picker,
                         headings=[{"name": n, "entries": c} for n, c in found])
 
     @app.get("/kb/new")

@@ -253,6 +253,13 @@ def test_topics_for_new_entries_and_moving_them(client, db):
     assert res.json() == {"topic": "Foraging"}
     assert [h["name"] for h in client.get("/api/headings?topic=Foraging").json()["headings"]] == ["Tea"]
     assert client.put("/api/entries/999/topic", json={"topic": "x"}, headers=H).status_code == 404
+    # A topic typed in other capitals gets the library's (or the KB's) spelling.
+    assert client.put(f"/api/entries/{nettle['entry_id']}/topic", json={"topic": " woodwork "}, headers=H).json() == {
+        "topic": "Woodwork"}
+    assert client.post("/api/entries", json={"title": "Smoke", "topic": "SURVIVAL"}, headers=H).json()["topic"] == "Survival"
+    # A new one typed in small letters gets a capital; one with capitals of its own is kept.
+    assert client.post("/api/entries", json={"title": "Knots", "topic": "rope work"}, headers=H).json()["topic"] == "Rope work"
+    assert client.post("/api/entries", json={"title": "Radio", "topic": "HAM radio"}, headers=H).json()["topic"] == "HAM radio"
     assert client.put(f"/api/entries/{nettle['entry_id']}/topic", json={"topic": "x"}).status_code == 403
 
 

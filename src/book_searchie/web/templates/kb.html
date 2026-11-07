@@ -6,6 +6,22 @@
   {% include "_kb_list.html" %}
   <div class="kb-main" id="kb-main">{% include "_kb_entry.html" %}</div>
 </div>
+
+<datalist id="kb-topic-list">{% for t in topic_names %}<option value="{{ t }}">{% endfor %}</datalist>
+
+<dialog class="kb-dialog" id="kb-new-dialog" aria-labelledby="kb-new-heading">
+  <form id="kb-new-form" autocomplete="off">
+    <h2 id="kb-new-heading">New entry</h2>
+    <label>Title <input name="title" maxlength="200" placeholder="e.g. Nettle" required></label>
+    <label>Topic <input name="topic" list="kb-topic-list" maxlength="200" placeholder="e.g. Herbalism"></label>
+    <p class="dim small">Its sub-headings come from the topic's list. Leave the topic empty for none.</p>
+    <p class="kb-status" role="status"></p>
+    <div class="kb-actions">
+      <button type="submit" class="primary">Make it</button>
+      <button type="button" data-close>Cancel</button>
+    </div>
+  </form>
+</dialog>
 {% endblock %}
 {% block scripts %}
 <script src="/static/kb_text.js?v={{ static_version }}"></script>

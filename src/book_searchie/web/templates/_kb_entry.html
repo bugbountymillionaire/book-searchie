@@ -2,7 +2,7 @@
    kb_entries.js does the editing. #}
 {% if current %}
 {% set e = current.entry %}
-<article class="kb-entry" id="kb-entry" data-entry-id="{{ e.id }}" data-title="{{ e.title }}" data-q="{{ kb_q }}">
+<article class="kb-entry" id="kb-entry" data-entry-id="{{ e.id }}" data-title="{{ e.title }}" data-topic="{{ e.topic }}" data-q="{{ kb_q }}">
   <header class="kb-entry-head">
     <h1>{{ e.title }}</h1>
     <div class="kb-entry-actions">
@@ -12,6 +12,11 @@
   </header>
 
   <div class="kb-entry-meta">
+    <p class="kb-topic-line">
+      <span class="dim">Topic</span>
+      {% if e.topic %}<a href="/kb/headings?{{ {'topic': e.topic}|urlencode }}" title="{{ e.topic }}'s sub-headings">{{ e.topic }}</a>{% else %}<span class="dim">none</span>{% endif %}
+      <button type="button" class="link-button small" data-act="change-topic" title="Its sub-headings show in its topic's order">Change</button>
+    </p>
     <p class="kb-also">
       {% if e.aliases %}<span class="dim">Also called</span>
       {% for a in e.aliases %}<span class="kb-name">{{ a }}<button type="button" class="kb-x" data-act="remove-alias" data-alias="{{ a }}" aria-label="Remove the other name {{ a }}" title="Remove">×</button></span>{% endfor %}

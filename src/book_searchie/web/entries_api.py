@@ -74,6 +74,11 @@ class HeadingRenameIn(BaseModel):
     new_heading: str
 
 
+def library_topics(db: Database) -> list[str]:
+    """The library's topics (its folders), A to Z."""
+    return [r["topic"] for r in db.topics() if r["topic"]]
+
+
 class TopicIn(BaseModel):
     topic: str
 
@@ -228,7 +233,8 @@ def add_entries_routes(
     def create_entry(data: EntryIn, x_book_searchie: str | None = Header(default=None)):
         require_app_header(x_book_searchie)
         with open_db() as db, open_notes() as store:
-            return entry_json(db, checked(lambda: store.create_entry(data.title, data.tags, data.topic)))
+            topic = store.topic_name(data.topic, library_topics(db))
+            return entry_json(db, checked(lambda: store.create_entry(data.title, data.tags, topic)))
 
     @app.post("/api/pieces", status_code=201)
     def add_piece(data: PieceIn, x_book_searchie: str | None = Header(default=None)):
@@ -341,9 +347,10 @@ def add_entries_routes(
     def set_topic(entry_id: int, data: TopicIn, x_book_searchie: str | None = Header(default=None)):
         """Move an entry to another topic: it shows its sub-headings in that topic's order."""
         require_app_header(x_book_searchie)
-        with open_notes(create=False) as store:
+        with open_db() as db, open_notes(create=False) as store:
             entry_or_404(store, entry_id)
-            return {"topic": checked(lambda: store.set_entry_topic(entry_id, data.topic))}
+            topic = store.topic_name(data.topic, library_topics(db))
+            return {"topic": checked(lambda: store.set_entry_topic(entry_id, topic))}
 
     @app.post("/api/entries/{entry_id}/headings/rename")
     def rename_heading(entry_id: int, data: HeadingRenameIn, x_book_searchie: str | None = Header(default=None)):

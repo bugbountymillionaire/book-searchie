@@ -96,6 +96,16 @@ def test_entry_page(client, notes, db):
     assert "<p>Pour on <strong>boiling</strong> water.</p>" in page and "&lt;leaves&gt;" in page
     assert f'href="/view/{culpeper}/1"' in page
     assert client.get("/kb/entry/999").status_code == 404
+    # Its topic, linking to the topic's sub-headings, with Change; Birch has none.
+    assert 'data-topic="Herbalism"' in page and 'href="/kb/headings?topic=Herbalism"' in page
+    assert 'data-act="change-topic"' in page
+    birch = client.get(f"/kb/entry/{notes.find_entry('Birch').id}").text
+    assert '<span class="dim">Topic</span>\n      <span class="dim">none</span>' in birch
+    assert 'href="/kb/headings?topic="' in birch  # the Sub-headings button: no topic's list
+    # New entry: a title and a topic, offered the library's topics.
+    assert 'id="kb-new-dialog"' in page and 'list="kb-topic-list"' in page
+    topics = page.split('<datalist id="kb-topic-list">')[1].split("</datalist>")[0]
+    assert topics == '<option value="Gardening"><option value="General"><option value="Herbalism"><option value="Woodwork">'
 
 
 def test_kb_parts_for_the_script(client, notes, db):
@@ -133,10 +143,30 @@ def test_headings_page(client, notes, db):
     # With no topic asked for, the first topic with sub-headings.
     assert "<h1>Sub-headings for Gardening</h1>" in client.get("/kb/headings").text
 
+    # A picker for every topic, with how many sub-headings it has, and No topic last.
+    picker = page.split('class="topic-picker"')[1].split("</nav>")[0]
+    assert [c.split(">")[1].split("<")[0] for c in picker.split('class="chip')[1:]] == [
+        "Gardening", "General", "Herbalism", "Woodwork", "No topic"]
+    assert 'href="/kb/headings?topic=Herbalism" aria-current="page"' in picker and "<span>8</span>" in picker
+    assert '<option value="Herbalism" selected' not in page  # the search box's topic isn't changed
+    # Typed in other capitals, the topic's own spelling.
+    assert "<h1>Sub-headings for Herbalism</h1>" in client.get("/kb/headings?topic=herbalism").text
+
+
+def test_headings_page_for_a_topic_with_none_yet(client, notes, db):
+    notes.create_entry("Water", topic="Survival")
+    page = client.get("/kb/headings?topic=Survival").text
+    assert "<h1>Sub-headings for Survival</h1>" in page and "data-name=" not in page
+    assert "Survival has no sub-headings yet" in page
+    picker = page.split('class="topic-picker"')[1].split("</nav>")[0]
+    assert 'href="/kb/headings?topic=Survival" aria-current="page"' in picker  # a KB-only topic is offered too
+
 
 def test_headings_page_before_any_notes(client, config):
     page = client.get("/kb/headings").text
-    assert "<h1>Sub-headings</h1>" in page and "data-name=" not in page and not config.notes_path.exists()
+    # The first of the library's topics, which has none yet.
+    assert "<h1>Sub-headings for Gardening</h1>" in page and "Gardening has no sub-headings yet" in page
+    assert "data-name=" not in page and not config.notes_path.exists()
 
 
 def test_book_notes_title_defaults_to_the_quote(client, notes, db):
