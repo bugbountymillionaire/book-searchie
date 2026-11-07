@@ -185,6 +185,40 @@
   }
   if (openButton) openButton.addEventListener("click", openFile);
 
+  // --- Research complete for this search ----------------------------------------
+  const researchButton = $("research-done");
+  if (researchButton) {
+    researchButton.addEventListener("click", async () => {
+      const done = researchButton.getAttribute("aria-pressed") !== "true";
+      researchButton.disabled = true;
+      try {
+        const res = await fetch("/api/research", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-Book-Searchie": "1" },
+          body: JSON.stringify({ file_id: Number(researchButton.dataset.book), q: researchButton.dataset.q, done }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast(body.error || "Couldn't save that.");
+          return;
+        }
+        researchButton.setAttribute("aria-pressed", String(done));
+        // The short label is for phones.
+        researchButton.querySelector(".research-label").innerHTML = done
+          ? '✓ <span class="wide-only">Researched</span><span class="narrow-only">Done</span>'
+          : '<span class="wide-only">Research complete</span><span class="narrow-only">Done?</span>';
+        researchButton.title = done
+          ? `Researched for "${body.term}". Click to undo.`
+          : `Mark this book as researched for "${body.term}"`;
+        toast(done ? `Marked as researched for "${body.term}"` : `No longer marked as researched for "${body.term}"`);
+      } catch (e) {
+        toast("Couldn't reach Book-Searchie. Is it still running?");
+      } finally {
+        researchButton.disabled = false;
+      }
+    });
+  }
+
   // --- Keyboard ---------------------------------------------------------------
   document.addEventListener("keydown", (e) => {
     if (e.target.closest("input, select, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;

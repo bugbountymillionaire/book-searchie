@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 
 from .db import check_fts5
 from .entries import DEFAULT_HEADINGS, EntriesMixin, migrate_to_entries, migrate_to_heading_list
+from .research import RESEARCH_SCHEMA, ResearchMixin
 from .search import QueryError, prepare_query
 
 SOURCE_TYPES = ("book", "other", "own")
@@ -98,6 +99,8 @@ _MIGRATIONS = [
     migrate_to_entries,
     # 4: the master list of sub-headings and their order, which you can change in the KB.
     migrate_to_heading_list,
+    # 5: books you've finished researching for a search term. See research.py.
+    RESEARCH_SCHEMA,
 ]
 
 # bm25 weights for title, quote, body, source_ref, tags.
@@ -266,7 +269,7 @@ def _best_snippet(row: sqlite3.Row, mark_open: str) -> str:
     return row["quote_snippet"] or row["body_snippet"] or row["any_snippet"] or ""
 
 
-class NotesStore(EntriesMixin):
+class NotesStore(EntriesMixin, ResearchMixin):
     def __init__(self, conn: sqlite3.Connection, headings: list[str] | None = None):
         self.conn = conn
         # The config's sub-headings, which start the master list in a new notes file.
@@ -459,10 +462,12 @@ class NotesStore(EntriesMixin):
     # --- keeping book notes attached to their books (called by the indexer) ---
 
     def move_book(self, old_path: str, new_path: str, topic: str, book_title: str) -> int:
-        """A book was moved or renamed: its notes and pieces follow it. Returns how many notes moved."""
+        """A book was moved or renamed: its notes, pieces and research records follow it.
+        Returns how many notes moved."""
         with self.conn:
             # Not a change to the notes themselves, so `updated` stays as it was.
             self._move_book_pieces(old_path, new_path, topic, book_title)
+            self._move_book_research(old_path, new_path, topic, book_title)
             return self.conn.execute(
                 "UPDATE notes SET path = ?, topic = ?, book_title = ?, source_missing = 0"
                 " WHERE source_type = 'book' AND path = ?",
@@ -476,6 +481,7 @@ class NotesStore(EntriesMixin):
         roots = [Path(r) for r in unavailable_roots]
         paths = [r[0] for r in self.conn.execute(
             "SELECT path FROM notes WHERE source_type = 'book' UNION SELECT path FROM pieces WHERE source_type = 'book'"
+            " UNION SELECT path FROM research"
         )]
         with self.conn:
             for path in paths:
@@ -490,6 +496,7 @@ class NotesStore(EntriesMixin):
                         f"UPDATE {table} SET source_missing = ? WHERE source_type = 'book' AND path = ?",
                         (missing, path),
                     )
+                self.conn.execute("UPDATE research SET source_missing = ? WHERE path = ?", (missing, path))
         return self.missing_count()
 
     def missing_count(self) -> int:

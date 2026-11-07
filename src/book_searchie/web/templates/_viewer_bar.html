@@ -24,6 +24,14 @@
     </span>
     {% if next_match is not none %}<a class="btn" id="next-match" href="/view/{{ book.id }}/{{ next_match }}{{ qs }}{{ '#wrap' if next_wraps }}" title="Next match (n)">Match ›</a>{% else %}<span class="btn disabled" id="next-match">Match ›</span>{% endif %}
     <a class="btn subtle" href="/book/{{ book.id }}{{ qs }}">List</a>
+    {% if research %}
+    {# Marks this book done for the search; pressed again, undoes it. viewer.js sends it. #}
+    <button type="button" class="btn research-done" id="research-done" data-book="{{ book.id }}" data-q="{{ q }}"
+            aria-pressed="{{ 'true' if research.done else 'false' }}"
+            title="{{ 'Researched for' if research.done else 'Mark this book as researched for' }} &quot;{{ research.term }}&quot;{{ '. Click to undo.' if research.done }}">
+      <span class="research-label">{% if research.done %}✓ <span class="wide-only">Researched</span><span class="narrow-only">Done</span>{% else %}<span class="wide-only">Research complete</span><span class="narrow-only">Done?</span>{% endif %}</span><span class="wide-only research-term"> for “{{ research.term }}”</span>
+    </button>
+    {% endif %}
   </div>
   {% endif %}
 </div>

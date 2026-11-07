@@ -353,7 +353,7 @@ def _v2_file(path):
     assert store.entry_count() == 0  # notes made now aren't entries
     store.conn.executescript(
         "DROP TABLE entries_fts; DROP TABLE sections_fts; DROP TABLE entry_tags; DROP TABLE pieces;"
-        " DROP TABLE sections; DROP TABLE entry_aliases; DROP TABLE entries; DROP TABLE headings;"
+        " DROP TABLE sections; DROP TABLE entry_aliases; DROP TABLE entries; DROP TABLE headings; DROP TABLE research;"
         " PRAGMA user_version = 2;"
     )
     store.close()

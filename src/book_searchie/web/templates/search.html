@@ -75,6 +75,7 @@
   {% if notes %}<h2 class="books-head">Books</h2>{% endif %}
   <p class="result-summary">
     {{ hit_count }}{% if capped %}+{% endif %} matching page{{ 's' if hit_count != 1 }} in {{ book_count }}{% if capped %}+{% endif %} book{{ 's' if book_count != 1 }}{% if topic %} in <strong>{{ topic }}</strong>{% endif %}
+    {% if researched_count %}<br><span class="research-progress">{{ researched_count }} of {{ book_count }} book{{ 's' if book_count != 1 }} researched for “{{ research_term }}”</span>{% endif %}
   </p>
   {% for b in books %}
   {% set first = b.hit %}
@@ -85,6 +86,7 @@
         <span class="tag">{{ first.topic }}</span>
         <span class="tag kind">{{ first.kind|upper }}</span>
         {% if first.ocr %}<span class="tag ocr" title="Text read by OCR, so there may be small mistakes">OCR</span>{% endif %}
+        {% if b.researched %}<span class="tag researched" title="You marked this book as researched for “{{ research_term }}”">✓ Researched</span>{% endif %}
         <span>{{ b.count }}{% if capped and b.count > 1 %}+{% endif %} match{{ 'es' if b.count != 1 }}</span>
       </div>
     </header>

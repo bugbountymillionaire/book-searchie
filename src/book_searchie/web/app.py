@@ -22,12 +22,14 @@ from ..db import Database
 from ..highlight import query_terms, text_spans
 from ..ocr import INSTALL_HELP, OcrUnavailable, check_available, ocr_candidates, ocr_copy_path, ocr_dir
 from ..problems import PROBLEMS, detail, group_problems
+from ..research import ResearchInvalid, research_term
 from ..search import QueryError, fill_snippets, matching_seqs, search
 from . import opener, render
 from .jobs import OcrBusy, OcrJob
 from .kb_pages import add_kb_pages, note_view
 from .entries_api import add_entries_routes
 from .notes_api import add_notes_routes, file_ids, open_notes_for
+from .research_api import add_research_routes
 
 HERE = Path(__file__).parent
 BOOKS_PER_PAGE = 10
@@ -151,6 +153,7 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
 
     add_notes_routes(app, config, open_db, _require_app_header)
     add_entries_routes(app, config, open_db, _require_app_header)
+    add_research_routes(app, config, open_db, _require_app_header)
     add_kb_pages(app, config, open_db, page)
 
     # --- Search ------------------------------------------------------------
@@ -194,6 +197,10 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
             for hit in hits:
                 books_found.setdefault(hit.file_id, {"hit": hit, "hits": []})["hits"].append(hit)
             book_list = list(books_found.values())
+            done_paths = store.researched_paths(q) if store and book_list else set()
+            for b in book_list:
+                b["researched"] = b["hit"].path in done_paths
+            researched_count = sum(b["researched"] for b in book_list)
             pages = note_pages if not want_books else max(1, -(-len(book_list) // BOOKS_PER_PAGE))
             page_no = min(max(1, page_no), pages)
             shown = book_list[(page_no - 1) * BOOKS_PER_PAGE : page_no * BOOKS_PER_PAGE]
@@ -206,6 +213,7 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
                 request, "search.html", db, q=q, topic=topic, books=shown, book_count=len(book_list),
                 hit_count=len(hits), capped=len(hits) == MAX_HITS, page_no=page_no, pages=pages,
                 notes=note_cards, note_total=note_total, **scope,
+                researched_count=researched_count, research_term=" ".join(q.split()).casefold(),
                 all_notes_url="/?" + urlencode({"q": q, "topic": topic, "kb": "1"}),
                 all_topics_url="/?" + urlencode({"q": q, **params}),
                 page_url=lambda n: "/?" + urlencode({"q": q, "topic": topic, **params, "page_no": n}),
@@ -224,6 +232,15 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
             return page(request, "book.html", db, q=q, book=row, hits=[_hit_view(h, terms) for h in hits])
 
     # --- Viewer ------------------------------------------------------------
+
+    def research_state(q: str, path: str) -> dict | None:
+        """For the Research complete button: the term, and whether this book is done for it."""
+        try:
+            term = research_term(q)
+        except ResearchInvalid:
+            return None
+        with open_notes_for(config, create=False) as store:
+            return {"term": term, "done": bool(store and store.is_researched(term, path))}
 
     @app.get("/view/{file_id}/{seq}", response_class=HTMLResponse)
     def view(request: Request, file_id: int, seq: int, q: str = ""):
@@ -246,6 +263,7 @@ def create_app(config: Config, *, allowed_hosts: list[str] = LOCAL_HOSTS) -> Fas
                 "match_total": len(matches),
             }
             qs = "?" + urlencode({"q": q}) if q else ""
+            nav["research"] = research_state(q, row["path"])
             if row["kind"] == "pdf":
                 try:
                     info = render.pdf_page(path, seq, query_terms(q))
