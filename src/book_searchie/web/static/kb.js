@@ -1,6 +1,7 @@
 // "Save to KB" panel in the viewer: save text from this page to an entry (Nettle), with
 // sub-headings typed in the text ("# Tea"), and see, edit or delete what's already been
-// saved from the page.
+// saved from the page. The panel stays open from page to page (and book to book), keeping
+// the entry and any unsaved text, until it's closed. Its width can be dragged.
 (function () {
   const $ = (id) => document.getElementById(id);
   const panel = $("kb-panel");
@@ -49,27 +50,110 @@
     } catch (err) { /* suggestions only */ }
   }
 
+  // --- Remembering the panel from page to page -----------------------------------------
+  // In this tab's session storage: whether it's open, the entry, the unsaved text and tags
+  // for a new entry. The width is kept for good, in local storage. Storage can be blocked
+  // (a private window), so everything still works without it.
+  const STATE_KEY = "bs-kb-panel";
+  const WIDTH_KEY = "bs-kb-width";
+  function readStore(store, key) {
+    try {
+      return JSON.parse(store.getItem(key) || "null");
+    } catch (e) {
+      return null;
+    }
+  }
+  function writeStore(store, key, value) {
+    try {
+      store.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  let remembered = true; // whether the unsaved text will survive turning the page
+  function remember() {
+    remembered = writeStore(sessionStorage, STATE_KEY, {
+      open: !panel.hidden,
+      entry: entryInput.value,
+      // Text being edited belongs to a piece on this page, so it isn't carried over.
+      text: editing ? "" : text.value,
+      tags: pendingTags,
+    });
+  }
+
   // --- Opening and closing -----------------------------------------------------
-  function open() {
+  function open(restoring) {
     panel.hidden = false;
     document.body.classList.add("kb-open");
     openButton.setAttribute("aria-expanded", "true");
     if (lastSelection) useSelection();
-    // Not on touch screens, where focusing would cover the panel with the keyboard.
-    if (matchMedia("(pointer: fine)").matches) (entryInput.value ? text : entryInput).focus({ preventScroll: true });
+    // Not when arriving on a new page, so n, p and s still work straight away; and not on
+    // touch screens, where focusing would cover the panel with the keyboard.
+    if (!restoring && matchMedia("(pointer: fine)").matches) {
+      (entryInput.value ? text : entryInput).focus({ preventScroll: true });
+    }
     loadPieces();
     loadHeadings();
+    remember();
   }
   function close() {
     panel.hidden = true;
     document.body.classList.remove("kb-open");
     openButton.setAttribute("aria-expanded", "false");
     openButton.focus({ preventScroll: true });
+    remember();
   }
   openButton.setAttribute("aria-controls", "kb-panel");
   openButton.setAttribute("aria-expanded", "false");
   openButton.addEventListener("click", () => (panel.hidden ? open() : close()));
   $("kb-close").addEventListener("click", close);
+
+  // --- The divider: drag the panel's edge to change its width ---------------------------
+  const DEFAULT_WIDTH = 420;
+  const handle = $("kb-resize");
+  function setWidth(px) {
+    const width = Math.round(Math.max(300, Math.min(px, window.innerWidth * 0.7, 1100)));
+    document.documentElement.style.setProperty("--kb-width", width + "px");
+    handle.setAttribute("aria-valuenow", String(width));
+    return width;
+  }
+  let width = setWidth(Number(readStore(localStorage, WIDTH_KEY)) || DEFAULT_WIDTH);
+  const keepWidth = () => writeStore(localStorage, WIDTH_KEY, width);
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add("kb-resizing");
+  });
+  handle.addEventListener("pointermove", (e) => {
+    if (handle.hasPointerCapture(e.pointerId)) width = setWidth(window.innerWidth - e.clientX);
+  });
+  const endDrag = (e) => {
+    if (!handle.hasPointerCapture(e.pointerId)) return;
+    handle.releasePointerCapture(e.pointerId);
+    document.body.classList.remove("kb-resizing");
+    keepWidth();
+  };
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
+  handle.addEventListener("dblclick", () => {
+    width = setWidth(DEFAULT_WIDTH);
+    keepWidth();
+  });
+  handle.addEventListener("keydown", (e) => {
+    const step = { ArrowLeft: 20, ArrowRight: -20 }[e.key];
+    if (step) {
+      e.preventDefault();
+      width = setWidth(width + step);
+      keepWidth();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      width = setWidth(DEFAULT_WIDTH);
+      keepWidth();
+    }
+  });
+  window.addEventListener("resize", () => (width = setWidth(width)));
 
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -312,6 +396,7 @@
     if (!entry) {
       pendingTags = tags;
       showTags();
+      remember();
       return;
     }
     try {
@@ -362,6 +447,7 @@
   cancelEdit.addEventListener("click", () => {
     endEdit();
     text.value = "";
+    remember();
     say("");
   });
 
@@ -424,12 +510,14 @@
         entryTitle = res.entry_title;
         say(`Saved to ${where(saved)}${res.new_entry ? " (new entry)" : ""}.`, "ok");
       }
-      // Keep the entry for the next piece; only the text is cleared.
+      // Keep the entry for the next piece; only the text is cleared. The text box lets go
+      // of the keyboard, so n goes straight to the next match and s adds the next text.
       text.value = "";
       pendingTags = [];
       entryInput.value = entryTitle;
+      remember();
+      text.blur();
       await Promise.all([lookup(), loadPieces()]);
-      text.focus({ preventScroll: true });
     } catch (err) {
       say(err.message, "error");
     } finally {
@@ -437,9 +525,13 @@
     }
   });
 
-  // Don't lose unsaved text by turning the page.
+  // Unsaved text goes with you to the next page. Only warn when it can't: when it's an edit
+  // to text saved from this page, or the browser won't store it.
+  for (const box of [entryInput, text]) box.addEventListener("input", remember);
+  window.addEventListener("pagehide", remember);
   window.addEventListener("beforeunload", (e) => {
-    if (text.value.trim()) e.preventDefault();
+    remember();
+    if (text.value.trim() && (editing || !remembered)) e.preventDefault();
   });
 
   // --- Text already saved from this page ---------------------------------------------
@@ -498,6 +590,15 @@
     return li;
   }
 
+  // Carry on where the last page left off.
+  const carried = readStore(sessionStorage, STATE_KEY);
+  if (carried) {
+    entryInput.value = carried.entry || "";
+    text.value = carried.text || "";
+    pendingTags = Array.isArray(carried.tags) ? carried.tags : [];
+  }
   showEntry();
-  loadHeadings();
+  if (entryInput.value.trim()) lookup();
+  if (carried && carried.open) open(true);
+  else loadHeadings();
 })();

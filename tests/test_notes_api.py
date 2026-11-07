@@ -199,6 +199,7 @@ def test_pdf_viewer_has_the_panel_and_page_text(client, db, library, config):
     # Entry and Text (sub-headings are typed in it): no quote box, sub-heading box or tag kinds.
     assert 'id="kb-entry"' in page and 'id="kb-text"' in page and 'id="kb-ghost"' in page
     assert 'id="kb-heading-input"' not in page
+    assert 'id="kb-resize" role="separator"' in page  # the divider
     assert 'id="kb-quote"' not in page and 'for="kb-tag-plant"' not in page
     assert '<div class="kb-text" id="kb-page-text" tabindex="0">Black <mark>cohosh</mark> &lt;b&gt;root&lt;/b&gt; &amp; more</div>' in page
 

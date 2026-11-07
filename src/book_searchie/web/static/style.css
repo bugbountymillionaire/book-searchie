@@ -179,12 +179,24 @@ a.btn:hover { text-decoration: none; border-color: var(--accent); }
 
 /* --- Save to KB panel (viewer) ---------------------------------------------- */
 .kb-panel {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 20; width: 420px; max-width: 100vw;
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 20; width: var(--kb-width, 420px); max-width: 100vw;
   overflow-y: auto; overscroll-behavior: contain; padding: 12px 18px 28px;
   background: var(--surface); border-left: 1px solid var(--line); box-shadow: -4px 0 18px rgb(0 0 0 / 0.12);
 }
 /* On wide screens the page moves over rather than being covered. */
-@media (min-width: 1000px) { body.kb-open { margin-right: 420px; } }
+@media (min-width: 1000px) { body.kb-open { margin-right: var(--kb-width, 420px); } }
+/* The divider: the panel's left edge, dragged to change its width. */
+.kb-resize {
+  position: fixed; top: 0; bottom: 0; right: calc(var(--kb-width, 420px) - 5px); width: 10px; z-index: 21;
+  cursor: col-resize; touch-action: none;
+}
+.kb-resize::after {
+  content: ""; position: absolute; top: 50%; left: 3px; width: 4px; height: 44px; margin-top: -22px;
+  border-radius: 2px; background: var(--line);
+}
+.kb-resize:hover::after, .kb-resize:focus-visible::after, .kb-resizing .kb-resize::after { background: var(--accent); }
+.kb-resize:focus-visible { outline: none; }
+body.kb-resizing { cursor: col-resize; user-select: none; }
 .kb-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .kb-head h2 { margin: 0; }
 .kb-close { border: 0; background: none; font-size: 1.6rem; line-height: 1; padding: 2px 8px; color: var(--dim); }
